@@ -17,7 +17,7 @@ import SetPasswordModal from './components/SetPasswordModal';
 // --- MOCK DATA ---
 const MOCK_PACKETS = [
   { id: 1, name: "Financial Vault", status: "Active", type: "Created" },
-  { id: 2, name: "Crypto Keys", status: "Active", type: "Created" },
+  { id: 2, name: "Social Credentials", status: "Active", type: "Created" },
 ];
 
 const MOCK_ASSIGNED = [

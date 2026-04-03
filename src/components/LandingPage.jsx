@@ -1,4 +1,5 @@
 import { motion } from 'framer-motion';
+import myLogo from '../assets/logo.svg';
 import { 
   Shield, ShieldCheck, Lock, Activity, Users, FileDigit, 
   Zap, Clock, FileText, CheckCircle2, AlertCircle 
@@ -10,10 +11,18 @@ export default function LandingPage({ onLoginClick, onSignUpClick, onDemoTrusted
       {/* Navigation Bar */}
       <nav className="sticky top-0 z-40 bg-[#FDF9F1]/80 backdrop-blur-md border-b border-gray-100 px-6 py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-2 text-[#FF8C00] font-bold text-xl">
+          {/* <div className="flex items-center gap-2 text-[#FF8C00] font-bold text-xl">
             <Shield className="w-6 h-6" />
             <span className="text-gray-900">The Final Transfer</span>
-          </div>
+          </div> */}
+          {/* Changed <div> to <a> and added href="/" */}
+            <a href="/" className="flex items-center gap-2 text-[#FF8C00] font-bold text-xl hover:opacity-90 transition-opacity cursor-pointer">
+              <img 
+                src={myLogo} 
+                alt="The Final Transfer Logo" 
+                className="h-10 w-auto object-contain" 
+              />
+            </a>
           <div className="hidden md:flex items-center gap-8 text-sm font-medium text-gray-600">
             <a href="#features" className="hover:text-gray-900 transition">Features</a>
             <a href="#how-it-works" className="hover:text-gray-900 transition">How It Works</a>

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
+import myLogo from '../assets/logo.svg';
 import { 
   Rocket, FileText, ChevronRight, Lock, 
   Clock, Download, User as UserIcon
@@ -12,10 +13,17 @@ export default function Dashboard({ user, packets, assigned, onLogout }) {
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="min-h-screen pb-20">
       <header className="bg-white shadow-sm border-b border-gray-100 py-4 px-6 fixed top-0 w-full z-10">
         <div className="max-w-5xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-2 text-[#FF6A00] font-bold text-xl">
+          {/* <div className="flex items-center gap-2 text-[#FF6A00] font-bold text-xl">
             <Rocket className="w-6 h-6" />
             <span className="hidden sm:inline">Final Transfer</span>
-          </div>
+          </div> */}
+          <a href="/" className="flex items-center gap-2 text-[#FF8C00] font-bold text-xl hover:opacity-90 transition-opacity cursor-pointer">
+                        <img 
+                          src={myLogo} 
+                          alt="The Final Transfer Logo" 
+                          className="h-10 w-auto object-contain" 
+                        />
+                      </a>
           <div className="flex items-center gap-4">
             <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center text-[#FF6A00] font-bold">
               {user?.email ? user.email.charAt(0).toUpperCase() : <UserIcon size={20} />}
@@ -131,7 +139,7 @@ function AssignedPacketsView({ assigned }) {
               )}
               {p.status === 'Deceased Verified' && (
                  <div className="mt-2 text-sm text-gray-500 flex items-center gap-2">
-                   <Lock size={16} className="text-emerald-500"/> Folder is encrypted. Use format: <code className="bg-gray-100 px-1 py-0.5 rounded text-xs text-black">firstname+contactnumber</code> to unlock.
+                   <Lock size={16} className="text-emerald-500"/> Folder is encrypted. Use format: <code className="bg-gray-100 px-1 py-0.5 rounded text-xs text-black">"shared personally to you"</code> to unlock.
                  </div>
               )}
             </div>

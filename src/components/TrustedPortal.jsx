@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
+import myLogo from '../assets/logo.svg';
 import { Rocket, CheckCircle2, ChevronRight, AlertCircle, Lock } from 'lucide-react';
 
 export default function TrustedPortal({ onProceedToLegal, onBack }) {
@@ -15,11 +16,17 @@ export default function TrustedPortal({ onProceedToLegal, onBack }) {
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="min-h-screen flex flex-col">
        <header className="py-6 px-6 text-center shrink-0">
-          <div className="inline-flex items-center justify-center gap-2 text-[#FF6A00] font-bold text-xl cursor-pointer" onClick={onBack}>
-            <Rocket className="w-6 h-6" />
-            <span>Final Transfer</span>
-          </div>
-       </header>
+  <div 
+    className="inline-flex items-center justify-center cursor-pointer hover:opacity-80 transition-opacity" 
+    onClick={onBack}
+  >
+    <img 
+      src={myLogo} 
+      alt="The Final Transfer Logo" 
+      className="h-10 w-auto object-contain" // Keeping the height constrained like we did in the navbar!
+    />
+  </div>
+</header>
 
        <main className="flex-1 flex flex-col items-center justify-center px-4 pb-20 max-w-2xl mx-auto w-full">
          <div className="bg-white p-8 md:p-10 rounded-[2rem] shadow-xl shadow-gray-200/50 border border-gray-100 w-full text-center">
