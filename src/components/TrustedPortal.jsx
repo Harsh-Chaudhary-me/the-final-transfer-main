@@ -1,93 +1,73 @@
-import { useState } from 'react';
-import { motion } from 'framer-motion';
-import myLogo from '../assets/logo.svg';
-import { Rocket, CheckCircle2, ChevronRight, AlertCircle, Lock } from 'lucide-react';
+import { useState } from "react";
+import { supabase } from "../supabase";
 
-export default function TrustedPortal({ onProceedToLegal, onBack }) {
-  const [selection, setSelection] = useState(null);
+export default function TrustedPortal({ trustedPackets = [], onRefresh }) {
+  const [loadingId, setLoadingId] = useState(null);
+  const [message, setMessage] = useState("");
 
-  const handleSelection = (type) => {
-    setSelection(type);
-    if (type === 'pass_away') {
-      setTimeout(() => onProceedToLegal(), 1500);
+  const requestEmergency = async (packetId, title) => {
+    setLoadingId(packetId);
+    setMessage("");
+    try {
+      const { data, error } = await supabase.functions.invoke("request-emergency", {
+        body: { packet_id: packetId },
+      });
+      if (error) throw new Error(error.message);
+      if (data?.error) throw new Error(data.error);
+      setMessage(`✅ Emergency access requested for "${title}". All trusted members notified.`);
+      onRefresh?.();
+    } catch (err) {
+      setMessage(`❌ ${err.message}`);
+    } finally {
+      setLoadingId(null);
     }
   };
 
+  if (!trustedPackets.length) {
+    return (
+      <div className="bg-gray-50 rounded-xl p-6 text-center text-gray-500">
+        <p className="font-medium">You are not added as trusted anywhere yet.</p>
+        <p className="text-sm mt-1">When someone adds you as trusted, their packets will appear here.</p>
+      </div>
+    );
+  }
+
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="min-h-screen flex flex-col">
-       <header className="py-6 px-6 text-center shrink-0">
-  <div 
-    className="inline-flex items-center justify-center cursor-pointer hover:opacity-80 transition-opacity" 
-    onClick={onBack}
-  >
-    <img 
-      src={myLogo} 
-      alt="The Final Transfer Logo" 
-      className="h-10 w-auto object-contain" // Keeping the height constrained like we did in the navbar!
-    />
-  </div>
-</header>
+    <div className="space-y-4">
+      {message && (
+        <div className="p-3 rounded-lg bg-blue-50 text-blue-800 text-sm">{message}</div>
+      )}
 
-       <main className="flex-1 flex flex-col items-center justify-center px-4 pb-20 max-w-2xl mx-auto w-full">
-         <div className="bg-white p-8 md:p-10 rounded-[2rem] shadow-xl shadow-gray-200/50 border border-gray-100 w-full text-center">
-             <div className="w-20 h-20 bg-orange-100 rounded-full flex items-center justify-center text-3xl font-bold text-[#FF6A00] mx-auto mb-6">
-                JD
-             </div>
-             <h2 className="text-2xl font-bold mb-8">What is the current status of John Doe?</h2>
-             
-             <div className="flex flex-col gap-4">
-                <button 
-                  onClick={() => handleSelection('safe')}
-                  className={`p-5 rounded-2xl border-2 transition-all flex items-center justify-between group ${selection === 'safe' ? 'border-[#FF6A00] bg-orange-50' : 'border-gray-100 hover:border-gray-200 bg-white'}`}
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center text-emerald-600"><CheckCircle2 size={20}/></div>
-                    <div className="text-left"><p className="font-bold text-lg">Safe & Fine</p><p className="text-xs text-gray-500">It's a false alarm.</p></div>
-                  </div>
-                  <ChevronRight className="text-gray-300 group-hover:text-gray-500" />
-                </button>
+      {trustedPackets.map((p) => (
+        <div key={p.id} className="border border-gray-200 rounded-xl p-5 bg-white shadow-sm">
+          <div className="flex justify-between items-start">
+            <div>
+              <h3 className="font-semibold text-lg">{p.title}</h3>
+              <p className="text-sm text-gray-600">
+                Owner: <span className="font-medium">{p.owner_email}</span>
+              </p>
+              <div className="flex gap-2 mt-2">
+                <span className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-700">
+                  {p.category}
+                </span>
+                <span className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-700">
+                  Added {new Date(p.created_at).toLocaleDateString()}
+                </span>
+              </div>
+            </div>
 
-                <button 
-                  onClick={() => handleSelection('emergency')}
-                  className={`p-5 rounded-2xl border-2 transition-all flex items-center justify-between group flex-wrap ${selection === 'emergency' ? 'border-[#FF9EA2] bg-red-50' : 'border-gray-100 hover:border-gray-200 bg-white'}`}
-                >
-                  <div className="flex items-center gap-4 w-full sm:w-auto">
-                    <div className="w-10 h-10 bg-[#FF9EA2]/20 rounded-full flex items-center justify-center text-[#FF9EA2]"><AlertCircle size={20}/></div>
-                    <div className="text-left"><p className="font-bold text-lg">Emergency</p><p className="text-xs text-gray-500">Hospitalized, unreachable, etc.</p></div>
-                  </div>
-                  {selection === 'emergency' && (
-                     <div className="w-full mt-4 animate-in fade-in zoom-in-95">
-                        <select className="w-full bg-white border border-[#FF9EA2]/40 rounded-xl py-2 px-3 focus:outline-none focus:ring-2 focus:ring-[#FF9EA2]">
-                          <option>Select Option...</option>
-                          <option>Hospitalized</option>
-                          <option>Accident</option>
-                          <option>Trip / Out of Reach</option>
-                          <option>Other</option>
-                        </select>
-                        <button className="w-full mt-3 py-3 rounded-xl bg-[#FF9EA2] text-white font-bold hover:bg-[#ff868b] transition">Submit Emergency Status</button>
-                     </div>
-                  )}
-                </button>
-
-                <button 
-                  onClick={() => handleSelection('pass_away')}
-                  className={`p-5 rounded-2xl border-2 transition-all flex items-center justify-between group ${selection === 'pass_away' ? 'border-gray-900 bg-gray-50' : 'border-gray-100 hover:border-gray-200 bg-white'}`}
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 bg-gray-200 rounded-full flex items-center justify-center text-gray-700"><Lock size={20}/></div>
-                    <div className="text-left"><p className="font-bold text-lg">Passed Away</p><p className="text-xs text-gray-500">Initiate final transfer protocols.</p></div>
-                  </div>
-                  <ChevronRight className="text-gray-300 group-hover:text-gray-500" />
-                </button>
-             </div>
-
-             {selection === 'safe' && (
-               <div className="mt-8 p-4 bg-emerald-50 rounded-xl border border-emerald-100 animate-in slide-in-from-bottom-2">
-                 <p className="text-sm font-medium text-emerald-800">Majority marked Safe. Access denied to nominees. Please call your friend to check in on them!</p>
-               </div>
-             )}
-         </div>
-       </main>
-    </motion.div>
+            {p.category === "emergency" && (
+              <button
+                onClick={() => requestEmergency(p.id, p.title)}
+                disabled={loadingId === p.id}
+                className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm px-4 py-2 rounded-lg font-medium"
+              >
+                {loadingId === p.id ? "Requesting..." : "Request Emergency Access"}
+              </button>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }

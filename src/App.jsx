@@ -1,9 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AnimatePresence } from 'framer-motion';
 
-// Firebase
-import { auth } from './firebase';
-import { onAuthStateChanged, signOut, isSignInWithEmailLink, signInWithEmailLink } from 'firebase/auth';
+// Supabase
+import { supabase } from './supabase';
 
 // Components
 import SplashScreen from './components/SplashScreen';
@@ -13,8 +12,11 @@ import TrustedPortal from './components/TrustedPortal';
 import LegalUploadPage from './components/LegalUploadPage';
 import AuthModal from './components/AuthModal';
 import SetPasswordModal from './components/SetPasswordModal';
+import TrustedVotePage from './components/TrustedVotePage';
+import NomineeDownloadPage from './components/NomineeDownloadPage';
+import Notifications from './components/Notifications';
 
-// --- MOCK DATA ---
+// --- MOCK DATA (kept for LegalUploadPage demo use) ---
 const MOCK_PACKETS = [
   { id: 1, name: "Financial Vault", status: "Active", type: "Created" },
   { id: 2, name: "Social Credentials", status: "Active", type: "Created" },
@@ -26,8 +28,21 @@ const MOCK_ASSIGNED = [
   { id: 103, ownerName: "Robert C.", name: "Digital Memories", status: "Deceased Verified" },
 ];
 
+/**
+ * Map current URL pathname to a view name.
+ * Handles deep links from email (nominee/download, trusted/vote, notifications).
+ */
+function resolveViewFromPath(pathname, hasUser) {
+  if (pathname === '/nominee/download') return 'nominee_download';
+  if (pathname === '/trusted/vote') return 'trusted_vote';
+  if (pathname === '/notifications') return 'notifications';
+  if (pathname === '/trusted') return 'trusted_portal';
+  if (pathname === '/dashboard' || hasUser) return 'dashboard';
+  return null;
+}
+
 export default function App() {
-  const [currentView, setCurrentView] = useState('splash'); // splash, landing, dashboard, trusted, legal
+  const [currentView, setCurrentView] = useState('splash');
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [isSignUpModalOpen, setIsSignUpModalOpen] = useState(false);
   const [isSetPasswordModalOpen, setIsSetPasswordModalOpen] = useState(false);
@@ -35,41 +50,29 @@ export default function App() {
 
   // For dashboard prototype
   const [assignedPackets, setAssignedPackets] = useState(MOCK_ASSIGNED);
-  const magicLinkHandled = useRef(false);
 
+  // ---- Initial session check + deep-link detection ----
   useEffect(() => {
-    // Handle Magic Link sign-in
-    if (isSignInWithEmailLink(auth, window.location.href) && !magicLinkHandled.current) {
-      magicLinkHandled.current = true;
-      let email = window.localStorage.getItem('emailForSignIn');
-      if (!email) {
-        // User opened the link on a different device. To prevent session fixation
-        // attacks, ask the user to provide the associated email again.
-        email = window.prompt('Please provide your email for confirmation');
-      }
-      
-      if (email) {
-        signInWithEmailLink(auth, email, window.location.href)
-          .then((result) => {
-            window.localStorage.removeItem('emailForSignIn');
-            // Remove the magic link query params from URL
-            window.history.replaceState({}, document.title, window.location.pathname);
-            
-            // In our flow, a user logging in via Magic Link is always a new signup
-            // who needs to set a password. We force the Set Password modal open.
-            setIsSetPasswordModalOpen(true);
-          })
-          .catch((error) => {
-            console.error("Error signing in with email link", error);
-            alert("This link is invalid or has expired.");
-          });
-      }
-    }
-
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      const currentUser = session?.user ?? null;
       setUser(currentUser);
-      
+
+      const viewFromUrl = resolveViewFromPath(window.location.pathname, !!currentUser);
+      if (viewFromUrl) setCurrentView(viewFromUrl);
+    });
+
+    // Listen for auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      const currentUser = session?.user ?? null;
+      setUser(currentUser);
+
+      if (event === 'PASSWORD_RECOVERY') {
+        setIsSetPasswordModalOpen(true);
+      }
+
       setCurrentView((prev) => {
+        const viewFromUrl = resolveViewFromPath(window.location.pathname, !!currentUser);
+        if (viewFromUrl) return viewFromUrl;
         if (currentUser && prev !== 'dashboard') return 'dashboard';
         if (!currentUser && prev === 'dashboard') return 'landing';
         return prev;
@@ -81,13 +84,27 @@ export default function App() {
       }
     });
 
-    return () => unsubscribe();
+    // Listen for popstate (browser back/forward) so URL changes still work
+    const onPopState = () => {
+      const viewFromUrl = resolveViewFromPath(window.location.pathname, !!user);
+      if (viewFromUrl) setCurrentView(viewFromUrl);
+    };
+    window.addEventListener('popstate', onPopState);
+
+    return () => {
+      subscription.unsubscribe();
+      window.removeEventListener('popstate', onPopState);
+    };
   }, []);
 
+  // ---- Splash screen auto-advance ----
   useEffect(() => {
     if (currentView === 'splash') {
       const timer = setTimeout(() => {
-        if (user) {
+        const viewFromUrl = resolveViewFromPath(window.location.pathname, !!user);
+        if (viewFromUrl) {
+          setCurrentView(viewFromUrl);
+        } else if (user) {
           setCurrentView('dashboard');
         } else {
           setCurrentView('landing');
@@ -97,70 +114,108 @@ export default function App() {
     }
   }, [currentView, user]);
 
+  // ---- Navigation helper ----
+  const navigateTo = (view, path = null) => {
+    setCurrentView(view);
+    const url =
+      path ||
+      (view === 'dashboard' ? '/dashboard'
+        : view === 'notifications' ? '/notifications'
+        : view === 'trusted_portal' ? '/trusted'
+        : view === 'trusted_vote' ? '/trusted/vote'
+        : view === 'nominee_download' ? '/nominee/download'
+        : view === 'legal' ? '/legal'
+        : '/');
+    window.history.pushState({}, '', url);
+    window.scrollTo(0, 0);
+  };
+
   const handleLogout = async () => {
     try {
-      await signOut(auth);
+      await supabase.auth.signOut();
+      setUser(null);
+      setCurrentView('landing');
+      window.history.pushState({}, '', '/');
     } catch (e) {
       console.error(e);
     }
-  };
-
-  const navigateTo = (view) => {
-    setCurrentView(view);
-    window.scrollTo(0, 0);
   };
 
   return (
     <div className="min-h-screen bg-[#FDF9F1] text-gray-800 font-sans selection:bg-[#FF8C00] selection:text-white">
       <AnimatePresence mode="wait">
         {currentView === 'splash' && <SplashScreen key="splash" />}
-        
+
         {currentView === 'landing' && (
-          <LandingPage 
-            key="landing" 
+          <LandingPage
+            key="landing"
             onLoginClick={() => setIsLoginModalOpen(true)}
             onSignUpClick={() => setIsSignUpModalOpen(true)}
-            onDemoTrusted={() => navigateTo('trusted')}
           />
         )}
-        
+
         {currentView === 'dashboard' && (
-           <Dashboard 
-             key="dashboard" 
-             user={user} 
-             packets={MOCK_PACKETS}
-             assigned={assignedPackets}
-             onLogout={handleLogout}
-           />
+  <Dashboard
+    key="dashboard"
+    user={user}
+    onLogout={handleLogout}
+    onNavigate={(view) => navigateTo(view)}
+  />
+)}
+
+        {currentView === 'trusted_portal' && (
+          <TrustedPortal
+            key="trusted_portal"
+            user={user}
+            onBack={() => navigateTo('dashboard')}
+          />
         )}
-        
-        {currentView === 'trusted' && (
-           <TrustedPortal 
-             key="trusted" 
-             onProceedToLegal={() => navigateTo('legal')}
-             onBack={() => navigateTo('landing')}
-           />
+
+        {currentView === 'trusted_vote' && (
+          <TrustedVotePage
+            key="trusted_vote"
+            user={user}
+            onBack={() => navigateTo('dashboard')}
+            onLoginClick={() => setIsLoginModalOpen(true)}
+          />
         )}
-        
+
+        {currentView === 'nominee_download' && (
+          <NomineeDownloadPage
+            key="nominee_download"
+            user={user}
+            onBack={() => navigateTo('dashboard')}
+            onLoginClick={() => setIsLoginModalOpen(true)}
+          />
+        )}
+
+        {currentView === 'notifications' && (
+          <Notifications
+            key="notifications"
+            user={user}
+            onBack={() => navigateTo('dashboard')}
+          />
+        )}
+
         {currentView === 'legal' && (
-           <LegalUploadPage 
-             key="legal" 
-             onBack={() => navigateTo('landing')}
-           />
+          <LegalUploadPage
+            key="legal"
+            onBack={() => navigateTo('landing')}
+          />
         )}
       </AnimatePresence>
 
       {/* Auth Modals */}
-      <AuthModal 
-        isOpen={isLoginModalOpen || isSignUpModalOpen} 
+      <AuthModal
+        isOpen={isLoginModalOpen || isSignUpModalOpen}
         isSignUpMode={isSignUpModalOpen}
         onClose={() => {
           setIsLoginModalOpen(false);
           setIsSignUpModalOpen(false);
-        }} 
+        }}
       />
 
-      <SetPasswordModal 
+      <SetPasswordModal
         isOpen={isSetPasswordModalOpen}
         onClose={() => setIsSetPasswordModalOpen(false)}
       />

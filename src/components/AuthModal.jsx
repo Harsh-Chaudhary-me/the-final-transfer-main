@@ -1,12 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { X, Mail, Lock, CheckCircle2 } from 'lucide-react';
-import { auth } from '../firebase';
-import { 
-  sendSignInLinkToEmail,
-  signInWithEmailAndPassword,
-  sendPasswordResetEmail
-} from 'firebase/auth';
+import { supabase } from '../supabase';
 
 export default function AuthModal({ isOpen, onClose, isSignUpMode }) {
   const [email, setEmail] = useState('');
@@ -32,12 +27,13 @@ export default function AuthModal({ isOpen, onClose, isSignUpMode }) {
     setLoading(true);
     setError('');
     try {
-      const actionCodeSettings = {
-        url: window.location.origin, // App URL to redirect to
-        handleCodeInApp: true,
-      };
-      await sendSignInLinkToEmail(auth, email, actionCodeSettings);
-      window.localStorage.setItem('emailForSignIn', email);
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: {
+          emailRedirectTo: window.location.origin,
+        },
+      });
+      if (error) throw error;
       setMode('magic-link-sent');
     } catch (err) {
       setError(err.message);
@@ -51,7 +47,11 @@ export default function AuthModal({ isOpen, onClose, isSignUpMode }) {
     setLoading(true);
     setError('');
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+      if (error) throw error;
       onClose();
     } catch (err) {
       setError(err.message);
@@ -69,7 +69,10 @@ export default function AuthModal({ isOpen, onClose, isSignUpMode }) {
     setLoading(true);
     setError('');
     try {
-      await sendPasswordResetEmail(auth, email);
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: window.location.origin,
+      });
+      if (error) throw error;
       setMode('reset-link-sent');
     } catch (err) {
       setError(err.message);

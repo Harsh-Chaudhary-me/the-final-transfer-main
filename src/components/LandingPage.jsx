@@ -2,10 +2,12 @@ import { motion } from 'framer-motion';
 import myLogo from '../assets/logo.svg';
 import {
   Shield, ShieldCheck, Lock, Activity, Users, FileDigit,
-  Zap, Clock, FileText, CheckCircle2, AlertCircle
+  Zap, Clock, FileText, CheckCircle2, AlertCircle,
+  Server, Key, EyeOff, ArrowRight, ShieldAlert,
+  Wallet, Landmark, Instagram, Mail, Gavel, Siren
 } from 'lucide-react';
 
-export default function LandingPage({ onLoginClick, onSignUpClick, onDemoTrusted }) {
+export default function LandingPage({ onLoginClick, onSignUpClick }) {
   return (
     <div className="bg-[#FDF9F1] min-h-screen font-sans selection:bg-[#FF8C00] selection:text-white">
       {/* Navigation Bar */}
@@ -66,10 +68,6 @@ export default function LandingPage({ onLoginClick, onSignUpClick, onDemoTrusted
               <a href="#how-it-works" className="px-8 py-4 rounded-full text-lg font-bold bg-white text-gray-800 border-2 border-gray-200 shadow-sm hover:border-gray-300 hover:bg-gray-50 transition-all flex items-center justify-center gap-2">
                 See How It Works
               </a>
-              <button onClick={onDemoTrusted} className="px-8 py-4 rounded-full text-lg font-bold bg-white text-gray-800 border-2 border-gray-200 shadow-sm hover:border-gray-300 hover:bg-gray-50 transition-all flex items-center justify-center gap-2">
-                <ShieldCheck className="w-5 h-5 text-[#FF9EA2]" />
-                Demo Verification
-              </button>
             </div>
           </motion.div>
         </div>

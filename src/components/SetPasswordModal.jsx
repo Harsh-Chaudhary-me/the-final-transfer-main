@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { X, Lock } from 'lucide-react';
-import { auth } from '../firebase';
-import { updatePassword } from 'firebase/auth';
+import { supabase } from '../supabase';
 
 export default function SetPasswordModal({ isOpen, onClose }) {
   const [password, setPassword] = useState('');
@@ -16,12 +15,9 @@ export default function SetPasswordModal({ isOpen, onClose }) {
     setLoading(true);
     setError('');
     try {
-      if (auth.currentUser) {
-        await updatePassword(auth.currentUser, password);
-        onClose();
-      } else {
-        setError('No authenticated user found.');
-      }
+      const { error } = await supabase.auth.updateUser({ password });
+      if (error) throw error;
+      onClose();
     } catch (err) {
       setError(err.message);
     } finally {
