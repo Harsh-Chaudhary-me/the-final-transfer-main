@@ -94,8 +94,7 @@ Deno.serve(async (req: Request) => {
       .select("email, full_name")
       .eq("user_id", packet.user_id);
 
-    const voteUrl = `http://localhost:5173/trusted/vote?requestId=${request.id}`;
-
+const voteUrl = `https://the-final-transfer-main.pages.dev/trusted/vote?requestId=${request.id}`;
     for (const member of (allTrusted || [])) {
       if (!member.email || member.email === user.email) continue;
 

@@ -54,8 +54,7 @@ Deno.serve(async (req: Request) => {
       }
       if (!Array.isArray(nominees)) nominees = [];
 
-      const downloadUrl = `http://localhost:5173/nominee/download?requestId=${req.id}`;
-
+const downloadUrl = `https://the-final-transfer-main.pages.dev/nominee/download?requestId=${req.id}`;
       for (const n of nominees) {
         const email = typeof n === "string" ? n : n?.email;
         if (!email) continue;
