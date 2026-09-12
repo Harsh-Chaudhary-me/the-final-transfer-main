@@ -1,8 +1,15 @@
 export async function sendEmail(to: string, subject: string, html: string) {
   const apiKey = Deno.env.get("RESEND_API_KEY");
+  const override = Deno.env.get("EMAIL_OVERRIDE"); // optional
+
   if (!apiKey) {
     console.error("[email] RESEND_API_KEY not set");
     return { success: false, error: "API key missing" };
+  }
+
+  const finalTo = override || to;
+  if (override && override !== to) {
+    console.log(`[email] OVERRIDE active — original recipient: ${to}, sending to: ${override}`);
   }
 
   try {
@@ -14,9 +21,12 @@ export async function sendEmail(to: string, subject: string, html: string) {
       },
       body: JSON.stringify({
         from: "TFT Project <onboarding@resend.dev>",
-        to: [to],
-        subject,
-        html,
+        to: [finalTo],
+        subject: `${subject}${override && override !== to ? ` [for ${to}]` : ""}`,
+        html: `
+          ${override && override !== to ? `<p style="background:#fff3cd;padding:8px;border-radius:4px;font-size:12px;"><strong>TEST MODE:</strong> Originally for ${to}</p>` : ""}
+          ${html}
+        `,
       }),
     });
 
