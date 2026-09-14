@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { AnimatePresence } from 'framer-motion';
+import TrustedInvite from './components/TrustedInvite';
 
 // Supabase
 import { supabase } from './supabase';
@@ -33,6 +34,7 @@ const MOCK_ASSIGNED = [
  * Handles deep links from email (nominee/download, trusted/vote, notifications).
  */
 function resolveViewFromPath(pathname, hasUser) {
+  if (pathname === '/trusted/invite') return 'trusted_invite';
   if (pathname === '/nominee/download') return 'nominee_download';
   if (pathname === '/trusted/vote') return 'trusted_vote';
   if (pathname === '/notifications') return 'notifications';
@@ -145,7 +147,9 @@ export default function App() {
     <div className="min-h-screen bg-[#FDF9F1] text-gray-800 font-sans selection:bg-[#FF8C00] selection:text-white">
       <AnimatePresence mode="wait">
         {currentView === 'splash' && <SplashScreen key="splash" />}
-
+            {currentView === 'trusted_invite' && (
+  <TrustedInvite key="trusted_invite" />
+)}
         {currentView === 'landing' && (
           <LandingPage
             key="landing"

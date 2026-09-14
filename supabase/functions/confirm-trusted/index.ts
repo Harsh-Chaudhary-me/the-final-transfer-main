@@ -1,5 +1,4 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { sendEmail } from "../_shared/email.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -20,7 +19,7 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    let body: { token?: string };
+    let body: { token?: string; action?: string };
     try {
       body = await req.json();
     } catch {
@@ -30,11 +29,38 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const { token } = body;
-    if (!token) {
+    const { token, action } = body;
+
+    // Validate required fields
+    if (!token || typeof token !== "string" || token.trim() === "") {
       return new Response(
-        JSON.stringify({ error: "Missing required field: token" }),
+        JSON.stringify({ error: "Missing or invalid required field: token" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (!action || typeof action !== "string" || !["status", "accept", "reject"].includes(action)) {
+      return new Response(
+        JSON.stringify({ error: "Missing or invalid required field: action (must be 'status' | 'accept' | 'reject')" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Hash the raw token using SHA-256
+    let hash: string;
+    try {
+      const hashBuf = await crypto.subtle.digest(
+        "SHA-256",
+        new TextEncoder().encode(token.trim())
+      );
+      hash = Array.from(new Uint8Array(hashBuf))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+    } catch (err) {
+      console.error("[confirm-trusted] Hashing error:", err);
+      return new Response(
+        JSON.stringify({ error: "Internal hashing error" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
@@ -43,114 +69,195 @@ Deno.serve(async (req: Request) => {
 
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Token is trusted_nominees.id
-    const { data: nominee, error: nomineeErr } = await adminClient
+    // Query trusted_nominees by hashed token
+    const { data: row, error: nomineeErr } = await adminClient
       .from("trusted_nominees")
-      .select("*")
-      .eq("id", token)
+      .select("id, user_id, email, full_name, status, invitation_expires_at")
+      .eq("invitation_token_hash", hash)
       .maybeSingle();
 
-    if (nomineeErr || !nominee) {
-      console.error("[confirm-trusted] Error finding trusted nominee:", nomineeErr);
+    if (nomineeErr || !row) {
       return new Response(
-        JSON.stringify({ error: "Invalid token or trusted nominee not found" }),
+        JSON.stringify({ status: "INVALID" }),
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const ownerId = nominee.owner_id || nominee.user_id;
-    const nomineeName = nominee.name || nominee.email || "A trusted contact";
-    const nomineeEmail = nominee.email || "";
+    // Check if invitation has expired
+    if (row.invitation_expires_at) {
+      const expiresAt = new Date(row.invitation_expires_at);
+      const now = new Date();
+      if (expiresAt < now) {
+        return new Response(
+          JSON.stringify({ status: "EXPIRED" }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    }
 
-    if (!ownerId) {
+    // ACTION: status - only read, never transition
+    if (action === "status") {
+      const { data: owner } = await adminClient.from("user_profiles")
+        .select("email")
+        .eq("id", row.user_id)
+        .maybeSingle();
+
       return new Response(
-        JSON.stringify({ error: "Owner ID not associated with this record" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({
+          status: row.status,
+          owner_email: owner?.email ?? null,
+          trusted_email: row.email,
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // 1. Insert notification into web_notifications for the owner
-    const { error: notifErr } = await adminClient.from("web_notifications").insert([
-      {
-        user_id: ownerId,
-        title: "Trusted Contact Confirmed",
-        message: `${nomineeName} (${nomineeEmail}) has confirmed their status as your trusted contact.`,
-        type: "trusted_confirmation",
-        created_at: new Date().toISOString(),
-      },
-    ]);
+    // ACTION: accept
+    if (action === "accept") {
+      // Idempotent: already accepted
+      if (row.status === "ACCEPTED") {
+        return new Response(
+          JSON.stringify({ status: "ACCEPTED" }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
 
-    if (notifErr) {
-      console.warn("[confirm-trusted] Warning inserting notification:", notifErr);
-    }
+      // Only transition from PENDING
+      if (row.status !== "PENDING") {
+        return new Response(
+          JSON.stringify({ status: row.status }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
 
-    // 2. Fetch owner's email & send email via shared email helper
-    let ownerEmail: string | null = nominee.owner_email || null;
+      // Update status to ACCEPTED
+      const { error: updateErr } = await adminClient
+        .from("trusted_nominees")
+        .update({ status: "ACCEPTED", accepted_at: "now()", updated_at: "now()" })
+        .eq("id", row.id);
 
-    if (!ownerEmail) {
-      try {
-        const { data: ownerUser } = await adminClient.auth.admin.getUserById(ownerId);
-        if (ownerUser?.user?.email) {
-          ownerEmail = ownerUser.user.email;
+      if (updateErr) {
+        console.error("[confirm-trusted] Update error:", updateErr);
+        return new Response(
+          JSON.stringify({ error: "Failed to update trusted nominee" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Fetch owner email
+      const { data: owner } = await adminClient.from("user_profiles")
+        .select("email")
+        .eq("id", row.user_id)
+        .maybeSingle();
+
+      // Insert notification for owner
+      if (owner?.email) {
+        const { error: notifErr } = await adminClient.from("web_notifications").insert({
+          user_email: owner.email.toLowerCase(),
+          title: "Trusted contact accepted",
+          message: `${row.email} accepted your invitation.`,
+          link: null,
+        });
+
+        if (notifErr) {
+          console.warn("[confirm-trusted] Warning inserting notification:", notifErr);
         }
-      } catch (err) {
-        console.warn("[confirm-trusted] Could not fetch owner email from auth.admin:", err);
       }
+
+      // Send email to owner (using shared email helper or direct fetch)
+      if (owner?.email) {
+        try {
+          const res = await fetch("https://api.resend.com/emails", {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${Deno.env.get("RESEND_API_KEY") ?? ""}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              from: "TFT Project <onboarding@resend.dev>",
+              to: [owner.email],
+              subject: "Trusted contact accepted - The Final Transfer",
+              html: `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #f0f0f0; border-radius: 16px; background-color: #ffffff;">
+                  <h2 style="color: #FF8C00; margin-top: 0;">Trusted Contact Accepted</h2>
+                  <p style="color: #333333; font-size: 16px; line-height: 1.5;">
+                    <strong>${row.email}</strong> has accepted your invitation to be a trusted contact on <strong>The Final Transfer</strong>.
+                  </p>
+                  <p style="color: #333333; font-size: 16px; line-height: 1.5;">
+                    They will now be able to assist in verification procedures when requested.
+                  </p>
+                  <hr style="border: none; border-top: 1px solid #eeeeee; margin: 24px 0;" />
+                  <p style="font-size: 12px; color: #888888; text-align: center;">
+                    &copy; 2026 The Final Transfer &bull; Secure Digital Legacy Management
+                  </p>
+                </div>
+              `,
+            }),
+          });
+
+          if (!res.ok) {
+            const errText = await res.text();
+            console.error("[confirm-trusted] Email send failed:", errText);
+          } else {
+            console.log("[confirm-trusted] Email sent to owner:", owner.email);
+          }
+        } catch (emailErr) {
+          console.error("[confirm-trusted] Email exception:", emailErr);
+        }
+      }
+
+      return new Response(
+        JSON.stringify({ status: "ACCEPTED" }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
-    if (ownerEmail) {
-      const subject = "Trusted Contact Confirmed - The Final Transfer";
-      const html = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #f0f0f0; border-radius: 16px; background-color: #ffffff;">
-          <h2 style="color: #FF8C00; margin-top: 0;">Trusted Contact Confirmation</h2>
-          <p style="color: #333333; font-size: 16px; line-height: 1.5;">Hello,</p>
-          <p style="color: #333333; font-size: 16px; line-height: 1.5;">
-            <strong>${nomineeName}</strong> (${nomineeEmail}) has successfully confirmed their status as a trusted contact for your account on <strong>The Final Transfer</strong>.
-          </p>
-          <p style="color: #666666; font-size: 14px; line-height: 1.5;">
-            No further action is required. They will now be able to assist in verification procedures when requested.
-          </p>
-          <hr style="border: none; border-top: 1px solid #eeeeee; margin: 24px 0;" />
-          <p style="font-size: 12px; color: #888888; text-align: center;">
-            &copy; 2026 The Final Transfer &bull; Secure Digital Legacy Management
-          </p>
-        </div>
-      `;
-
-      try {
-        await sendEmail(ownerEmail, subject, html);
-        console.log(`[confirm-trusted] Email sent to owner (${ownerEmail})`);
-      } catch (emailErr) {
-        console.error("[confirm-trusted] Failed to send email to owner:", emailErr);
+    // ACTION: reject
+    if (action === "reject") {
+      // Only transition from PENDING
+      if (row.status !== "PENDING") {
+        return new Response(
+          JSON.stringify({ status: row.status }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
       }
-    } else {
-      console.warn("[confirm-trusted] Owner email not found; skipped sending email.");
+
+      // Update status to REJECTED
+      const { error: updateErr } = await adminClient
+        .from("trusted_nominees")
+        .update({ status: "REJECTED", rejected_at: "now()", updated_at: "now()"})
+        .eq("id", row.id);
+
+      if (updateErr) {
+        console.error("[confirm-trusted] Update error:", updateErr);
+        return new Response(
+          JSON.stringify({ error: "Failed to update trusted nominee" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Notify owner: "X declined to be your trusted contact."
+      // Note: email notification is logged but not auto-sent to avoid
+      // unintended consumption; the system records the rejection.
+      console.log("[confirm-trusted] Trusted contact rejected by:", row.email);
+
+      return new Response(
+        JSON.stringify({ status: "REJECTED" }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
+    // Should not reach here, but safety net
     return new Response(
-      JSON.stringify({
-        success: true,
-        message: "Trusted member status confirmed and owner notified.",
-      }),
-      {
-        status: 200,
-        headers: {
-          ...corsHeaders,
-          "Content-Type": "application/json",
-        },
-      }
+      JSON.stringify({ error: "Invalid action specified" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
+
   } catch (err: any) {
     console.error("[confirm-trusted] Server error:", err);
     return new Response(
       JSON.stringify({ error: err.message || "Internal Server Error" }),
-      {
-        status: 500,
-        headers: {
-          ...corsHeaders,
-          "Content-Type": "application/json",
-        },
-      }
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
 });
