@@ -117,16 +117,24 @@ Deno.serve(async (req: Request) => {
       });
 
       try {
-        await sendEmail(
-          lower,
-          "Your data is ready — The Final Transfer",
-          `
-            <h2>Your data is ready</h2>
-            <p>The death claim for the owner of <strong>${packet.title}</strong> has been verified by our support team.</p>
-            <p><a href="${downloadLink}" style="background:#FF8C00;color:#fff;padding:12px 24px;text-decoration:none;border-radius:8px;display:inline-block;">Open download page</a></p>
-            <p>You can access these files at any time using the link above.</p>
-          `
-        );
+       await sendTemplatedEmail(
+  lower,
+  "Your data is ready — The Final Transfer",
+  {
+    title: "Your data is ready",
+    preheader: "The claim has been verified.",
+    body: `
+      <p>The death claim for the owner of <strong>${packet.title}</strong> has been verified by our support team.</p>
+      <p>You can access the packet at any time using the link below.</p>
+    `,
+    primaryCta: {
+      label: "Open Download Page",
+      url: downloadLink,
+    },
+    privacyNote:
+      "This link is unique to you. Do not forward it to anyone else.",
+  }
+);
         notified++;
       } catch (e) {
         console.error("[approve-death-claim] email failed for", lower, e);

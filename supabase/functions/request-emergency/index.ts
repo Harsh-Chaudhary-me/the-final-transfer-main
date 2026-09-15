@@ -107,17 +107,26 @@ const voteUrl = `https://the-final-transfer-main.pages.dev/trusted/vote?requestI
       });
 
       // Email
-      await sendEmail(
-        member.email,
-        `[URGENT] Emergency Access Request for "${packet.title}"`,
-        `
-          <h2>Emergency Access Request</h2>
-          <p><strong>${user.email}</strong> has requested emergency access to packet <strong>${packet.title}</strong>.</p>
-          <p>As a trusted member, you must vote to approve or reject this request.</p>
-          <p><a href="${voteUrl}" style="background:#000;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;">Vote Now</a></p>
-          <p>If you don't vote within 6 hours, the request will expire.</p>
-        `
-      );
+     await sendTemplatedEmail(
+  trustedEmail,
+  "Emergency vote requested — The Final Transfer",
+  {
+    title: "Emergency Vote Requested",
+    preheader: `${requesterEmail} requested emergency access to "${packet.title}".`,
+    body: `
+      <p><strong>${requesterEmail}</strong> has requested emergency access to the packet <strong>${packet.title}</strong>.</p>
+      <p>As a Trusted Person, please review and cast your vote. If all Trusted Persons approve, the packet will be released to the nominee after a 6-hour window.</p>
+    `,
+    primaryCta: {
+      label: "Vote Now",
+      url: `${WEB_BASE_URL}/trusted/vote?requestId=${request.id}`,
+    },
+    footnote:
+      "If you do not vote within the allowed window, the request will expire.",
+    privacyNote:
+      "Your vote is only visible in aggregate — individual votes are not disclosed to other Trusted Persons.",
+  }
+);
     }
 
     return new Response(JSON.stringify({ success: true, request_id: request.id }), {

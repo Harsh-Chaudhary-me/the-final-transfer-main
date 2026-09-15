@@ -3,7 +3,7 @@ export async function sendEmail(to: string, subject: string, html: string) {
   const from =
     Deno.env.get("EMAIL_FROM") ??
     "The Final Transfer <no-reply@thefinaltransfer.tech>";
-  const override = Deno.env.get("EMAIL_OVERRIDE"); // optional test override
+  const override = Deno.env.get("EMAIL_OVERRIDE"); // test override
 
   if (!apiKey) {
     console.error("[email] RESEND_API_KEY not set");
@@ -12,9 +12,7 @@ export async function sendEmail(to: string, subject: string, html: string) {
 
   const finalTo = override || to;
   if (override && override !== to) {
-    console.log(
-      `[email] OVERRIDE active — original: ${to}, sending to: ${override}`
-    );
+    console.log(`[email] OVERRIDE — original: ${to}, sending to: ${override}`);
   }
 
   try {
@@ -28,14 +26,7 @@ export async function sendEmail(to: string, subject: string, html: string) {
         from,
         to: [finalTo],
         subject: `${subject}${override && override !== to ? ` [for ${to}]` : ""}`,
-        html: `
-          ${
-            override && override !== to
-              ? `<p style="background:#fff3cd;padding:8px;border-radius:4px;font-size:12px;"><strong>TEST MODE:</strong> Originally for ${to}</p>`
-              : ""
-          }
-          ${html}
-        `,
+        html,
       }),
     });
 
@@ -49,4 +40,13 @@ export async function sendEmail(to: string, subject: string, html: string) {
     console.error("[email] exception:", err);
     return { success: false, error: String(err) };
   }
+}
+
+export async function sendTemplatedEmail(
+  to: string,
+  subject: string,
+  opts: import("./emailTemplate.ts").RenderEmailOptions
+) {
+  const { renderEmail } = await import("./emailTemplate.ts");
+  return sendEmail(to, subject, renderEmail(opts));
 }

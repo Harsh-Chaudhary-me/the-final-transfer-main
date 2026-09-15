@@ -162,17 +162,26 @@ Deno.serve(async (req: Request) => {
       const downloadUrl = `${webBaseUrl}/nominee/claim?token=${raw}`;
 
       try {
-        await sendEmail(
-          email,
-          "Take your data",
-          `
-            <h2>Data Release Authorized</h2>
-            <p>The owner of "${packet.title}" has verified their passing.</p>
-            <p>You can now claim your data using the link below.</p>
-            <p><a href="${downloadUrl}" style="background:#000;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;">Claim Your Data</a></p>
-            <p>This link will remain valid until it is used or until it expires.</p>
-          `
-        );
+        await sendTemplatedEmail(
+  email,
+  "Take your data — The Final Transfer",
+  {
+    title: "Your data is ready",
+    preheader: `You can now claim your data.`,
+    body: `
+      <p>The owner of <strong>${packet.title}</strong> has been confirmed unreachable by their trusted contacts.</p>
+      <p>You can now claim your data using the link below.</p>
+    `,
+    primaryCta: {
+      label: "Claim Your Data",
+      url: downloadUrl,
+    },
+    footnote:
+      "This link will remain valid until it is used or until it expires.",
+    privacyNote:
+      "If you were not expecting this message, contact support before proceeding.",
+  }
+);
         notifiedCount++;
       } catch (emailErr) {
         console.error("[verify-death] email send failed:", emailErr);

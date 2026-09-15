@@ -1,12 +1,10 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { sendTemplatedEmail } from "../_shared/email.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
-
-const EMAIL_FROM =
-  Deno.env.get("EMAIL_FROM") ?? "TFT Project <onboarding@resend.dev>";
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -144,6 +142,7 @@ Deno.serve(async (req: Request) => {
       }
 
       if (ownerEmail) {
+        // In-app notification for the owner
         await adminClient.from("web_notifications").insert({
           user_email: ownerEmail,
           title: "Trusted contact accepted",
@@ -151,41 +150,26 @@ Deno.serve(async (req: Request) => {
           link: null,
         });
 
+        // Branded email to the owner
         try {
-          const res = await fetch("https://api.resend.com/emails", {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${Deno.env.get("RESEND_API_KEY") ?? ""}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              from: EMAIL_FROM,
-              to: [ownerEmail],
-              subject: "Trusted contact accepted — The Final Transfer",
-              html: `
-                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #f0f0f0; border-radius: 16px; background-color: #ffffff;">
-                  <h2 style="color: #FF8C00; margin-top: 0;">Trusted Contact Accepted</h2>
-                  <p style="color: #333333; font-size: 16px; line-height: 1.5;">
-                    <strong>${row.email}</strong> has accepted your invitation to be a trusted contact on <strong>The Final Transfer</strong>.
-                  </p>
-                  <p style="color: #333333; font-size: 16px; line-height: 1.5;">
-                    They will now be able to assist in verification procedures when requested.
-                  </p>
-                  <hr style="border: none; border-top: 1px solid #eeeeee; margin: 24px 0;" />
-                  <p style="font-size: 12px; color: #888888; text-align: center;">
-                    &copy; 2026 The Final Transfer &bull; Secure Digital Legacy Management
-                  </p>
-                </div>
+          await sendTemplatedEmail(
+            ownerEmail,
+            "Trusted contact accepted — The Final Transfer",
+            {
+              title: "Trusted Contact Accepted",
+              preheader: `${row.email} accepted your invitation.`,
+              body: `
+                <p>Good news — <strong>${row.email}</strong> has accepted your invitation to become a Trusted Person for your account.</p>
+                <p>They can now assist in verification procedures when requested. They will <strong>not</strong> have access to your files or packet contents.</p>
               `,
-            }),
-          });
-
-          if (!res.ok) {
-            const errText = await res.text();
-            console.error("[confirm-trusted] Email send failed:", errText);
-          }
+              callout:
+                "You can manage your trusted contacts at any time from the mobile app.",
+              privacyNote:
+                "If you did not invite this person, contact support immediately.",
+            }
+          );
         } catch (emailErr) {
-          console.error("[confirm-trusted] Email exception:", emailErr);
+          console.error("[confirm-trusted] Accept email failed:", emailErr);
         }
       }
 
@@ -219,14 +203,34 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      // Notify owner
       if (ownerEmail) {
+        // In-app notification for the owner
         await adminClient.from("web_notifications").insert({
           user_email: ownerEmail,
           title: "Trusted contact declined",
           message: `${row.email} declined to be your trusted contact.`,
           link: null,
         });
+
+        // Branded email to the owner
+        try {
+          await sendTemplatedEmail(
+            ownerEmail,
+            "Trusted contact declined — The Final Transfer",
+            {
+              title: "Trusted Contact Declined",
+              preheader: `${row.email} declined your invitation.`,
+              body: `
+                <p><strong>${row.email}</strong> has declined your invitation to be a Trusted Person.</p>
+                <p>You may invite a different contact from the mobile app if you wish.</p>
+              `,
+              privacyNote:
+                "No action is required. This is an informational notice.",
+            }
+          );
+        } catch (emailErr) {
+          console.error("[confirm-trusted] Reject email failed:", emailErr);
+        }
       }
 
       return new Response(

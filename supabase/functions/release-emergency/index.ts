@@ -66,16 +66,24 @@ const downloadUrl = `https://the-final-transfer-main.pages.dev/nominee/download?
           link: `/nominee/download?requestId=${req.id}`,
         });
 
-        await sendEmail(
-          email,
-          `[URGENT] Emergency Packet Released: ${packet.title}`,
-          `
-            <h2>Emergency Data Released</h2>
-            <p>The emergency packet <strong>${packet.title}</strong> has been released to you.</p>
-            <p><strong>You have 6 hours to download the files.</strong></p>
-            <p><a href="${downloadUrl}" style="background:#000;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;">Download Now</a></p>
-          `
-        );
+        await sendTemplatedEmail(
+  nomineeEmail,
+  "Emergency release authorized — The Final Transfer",
+  {
+    title: "Emergency Data Release",
+    preheader: `Emergency access has been authorized for "${packet.title}".`,
+    body: `
+      <p>The Trusted Persons for <strong>${packet.title}</strong> have unanimously authorized emergency release of this packet.</p>
+      <p>Your files are ready to download and remain available any time.</p>
+    `,
+    primaryCta: {
+      label: "Open Download Page",
+      url: `${WEB_BASE_URL}/nominee/download?requestId=${req.id}`,
+    },
+    privacyNote:
+      "If you were not expecting this, contact the packet owner or support.",
+  }
+);
       }
 
       releasedCount++;

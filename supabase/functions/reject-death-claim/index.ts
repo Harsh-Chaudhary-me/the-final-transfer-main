@@ -60,16 +60,21 @@ Deno.serve(async (req: Request) => {
       });
 
       try {
-        await sendEmail(
-          submitter,
-          "Claim review result — The Final Transfer",
-          `
-            <h2>Claim review result</h2>
-            <p>After reviewing the documentation you submitted, our team was unable to approve this claim at this time.</p>
-            ${reason ? `<p><strong>Reason:</strong> ${reason}</p>` : ""}
-            <p>If you believe this is in error, you may contact support with additional documentation.</p>
-          `
-        );
+        await sendTemplatedEmail(
+  submitter,
+  "Claim review result — The Final Transfer",
+  {
+    title: "Claim Review Result",
+    preheader: "Your submission could not be approved.",
+    body: `
+      <p>After reviewing the documentation you submitted, our team was unable to approve this claim at this time.</p>
+      ${reason ? `<p><strong>Reason:</strong> ${reason}</p>` : ""}
+      <p>If you believe this is in error, you may reply with additional documentation.</p>
+    `,
+    privacyNote:
+      "This notice is informational only. No further action is required unless you wish to appeal.",
+  }
+);
       } catch (e) {
         console.error("[reject-death-claim] email failed", e);
       }
