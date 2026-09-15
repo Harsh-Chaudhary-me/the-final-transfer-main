@@ -48,38 +48,83 @@ export default function AdminClaims() {
   };
 
   const review = async (claim, decision) => {
-    const reason = reasons[claim.id] || '';
-    const confirmMsg =
-      decision === 'approve'
-        ? `Approve claim for "${claim.deceased_full_name}" and release the packet?`
-        : `Reject claim for "${claim.deceased_full_name}"?`;
-    if (!window.confirm(confirmMsg)) return;
+  const reason = reasons[claim.id] || '';
 
-    setBusy(claim.id);
-    try {
+  // Find all sibling pending claims from the same submitter.
+  // "Sibling" = same submitted_by_email AND status='pending'.
+  // Approving/rejecting one applies to all — the owner is one person,
+  // and their packets release together.
+  const siblings = claims.filter(
+    (c) =>
+      c.status === 'pending' &&
+      c.submitted_by_email.toLowerCase() ===
+        claim.submitted_by_email.toLowerCase()
+  );
+
+  const count = siblings.length;
+  const confirmMsg =
+    decision === 'approve'
+      ? `Approve claim for "${claim.deceased_full_name}"?\n\n` +
+        `This will release ${count} packet${count !== 1 ? 's' : ''} for ` +
+        `${claim.submitted_by_email} and notify all nominees.`
+      : `Reject claim for "${claim.deceased_full_name}"?\n\n` +
+        `This will reject ${count} packet${count !== 1 ? 's' : ''} for ` +
+        `${claim.submitted_by_email}.`;
+
+  if (!window.confirm(confirmMsg)) return;
+
+  setBusy(claim.id);
+  try {
+    let approved = 0;
+    let rejected = 0;
+    let totalNotified = 0;
+    const failures = [];
+
+    for (const c of siblings) {
       const res = await fetch(`${apiBase}/review-death-claim`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${adminKey}`,
         },
-        body: JSON.stringify({ claim_id: claim.id, decision, reason }),
+        body: JSON.stringify({ claim_id: c.id, decision, reason }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Review failed');
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        failures.push(`${c.id.slice(0, 8)}: ${data.error || res.status}`);
+        continue;
+      }
 
       if (decision === 'approve') {
-        alert(`✅ Approved & released. ${data.notified ?? 0} nominee(s) notified.`);
+        approved++;
+        totalNotified += data.notified ?? 0;
       } else {
-        alert('✅ Rejected. Submitter notified.');
+        rejected++;
       }
-      loadClaims();
-    } catch (e) {
-      alert(`❌ ${e.message}`);
-    } finally {
-      setBusy(null);
     }
-  };
+
+    if (failures.length) {
+      alert(
+        `⚠️ Some claims could not be processed:\n\n${failures.join('\n')}\n\n` +
+          (decision === 'approve'
+            ? `Approved: ${approved}, notified: ${totalNotified}`
+            : `Rejected: ${rejected}`)
+      );
+    } else {
+      alert(
+        decision === 'approve'
+          ? `✅ Approved ${approved} packet(s). ${totalNotified} nominee(s) notified.`
+          : `✅ Rejected ${rejected} packet(s). Submitter notified.`
+      );
+    }
+    loadClaims();
+  } catch (e) {
+    alert(`❌ ${e.message}`);
+  } finally {
+    setBusy(null);
+  }
+};
 
   return (
     <div className="min-h-screen bg-[#FDF9F1] px-4 py-10">
