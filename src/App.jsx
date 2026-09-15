@@ -11,6 +11,7 @@ import NomineeClaim from './components/NomineeClaim';
 import LandingPage from './components/LandingPage';
 import Dashboard from './components/Dashboard';
 import TrustedPortal from './components/TrustedPortal';
+import DeathClaimSupport from './components/DeathClaimSupport';
 import LegalUploadPage from './components/LegalUploadPage';
 import AuthModal from './components/AuthModal';
 import SetPasswordModal from './components/SetPasswordModal';
@@ -38,6 +39,7 @@ function resolveViewFromPath(pathname, hasUser) {
   if (pathname === '/trusted/invite') return 'trusted_invite';
 if (pathname === '/nominee/claim') return 'nominee_claim';
   if (pathname === '/nominee/download') return 'nominee_download';
+  if (pathname === '/support/death-claim') return 'death_claim_support';
   if (pathname === '/trusted/vote') return 'trusted_vote';
   if (pathname === '/notifications') return 'notifications';
   if (pathname === '/trusted') return 'trusted_portal';
@@ -211,6 +213,9 @@ export default function App() {
           />
         )}
         {currentView === 'nominee_claim' && <NomineeClaim key="nominee_claim" />}
+        {currentView === 'death_claim_support' && (
+  <DeathClaimSupport key="death_claim_support" />
+)}
       </AnimatePresence>
 
       {/* Auth Modals */}

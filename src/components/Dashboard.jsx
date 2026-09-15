@@ -5,8 +5,8 @@ import myLogo from '../assets/logo.svg';
 import { supabase } from '../supabase';
 import {
   FileText, ChevronRight, Lock,
-  Clock, Download, User as UserIcon, Shield,
-  ShieldAlert, CheckCircle2, AlertCircle, PlusCircle, UserCheck, Inbox,
+  Download, User as UserIcon, Shield,
+  ShieldAlert, CheckCircle2, PlusCircle, UserCheck, Inbox,
   Bell, Eye
 } from 'lucide-react';
 
@@ -35,6 +35,7 @@ export default function Dashboard({ user, onLogout, onNavigate }) {
   const [activeTab, setActiveTab] = useState('all');
   const [requestingPacketId, setRequestingPacketId] = useState(null);
   const [confirmingOwnerId, setConfirmingOwnerId] = useState(null);
+  const [statusConfirmTarget, setStatusConfirmTarget] = useState(null);
   const [downloadingRequestId, setDownloadingRequestId] = useState(null);
   const [unreadCount, setUnreadCount] = useState(0);
 
@@ -94,95 +95,41 @@ export default function Dashboard({ user, onLogout, onNavigate }) {
     }
   };
 
- const handleConfirmOwnerStatus = async (ownerEmail, packets) => {
-  const packetCount = packets.length;
-  const firstTitle = packets[0]?.title || 'their packets';
+  const handleConfirmOwnerStatus = (ownerEmail, packets) => {
+    setStatusConfirmTarget({ ownerEmail, packets });
+  };
 
-  const ok = window.confirm(
-    `Report ${ownerEmail} as unreachable?\n\n` +
-    `This will release ${packetCount} packet${packetCount !== 1 ? 's' : ''} ` +
-    `(starting with "${firstTitle}") and notify all nominees with a claim link.\n\n` +
-    `Only proceed if you are confident something has happened to the owner.`
-  );
-  if (!ok) return;
+  const handleVerifyOwnerPresence = async (ownerEmail) => {
+    const ok = window.confirm(
+      `Confirm that ${ownerEmail} is active and reachable?\n\n` +
+      `This records a positive presence check. The owner will be notified.`
+    );
+    if (!ok) return;
 
-  setConfirmingOwnerId(ownerEmail);
-  try {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) throw new Error('Authentication session expired');
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Authentication session expired');
 
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    let totalNotified = 0;
-    const failures = [];
-
-    for (const p of packets) {
-      const res = await fetch(`${supabaseUrl}/functions/v1/verify-death`, {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const res = await fetch(`${supabaseUrl}/functions/v1/verify-presence`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${session.access_token}`,
           'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
         },
-        body: JSON.stringify({ packet_id: p.id }),
+        body: JSON.stringify({ owner_email: ownerEmail }),
       });
-      const result = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        failures.push(`${p.title || p.id}: ${result.error || res.status}`);
-        continue;
-      }
-      totalNotified += result.notified ?? 0;
+
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || 'Failed to record presence');
+
+      alert(`✅ Presence verified for ${ownerEmail}.`);
+    } catch (err) {
+      alert(`❌ ${err.message || 'Could not record presence check.'}`);
     }
+  };
 
-    if (failures.length) {
-      alert(
-        `⚠️ Some packets could not be released:\n\n${failures.join('\n')}\n\n` +
-        `Notified: ${totalNotified}`
-      );
-    } else {
-      alert(
-        `✅ Owner status recorded for ${ownerEmail}.\n\n` +
-        `${packets.length} packet(s) released.\n` +
-        `${totalNotified} nominee(s) notified with claim links.`
-      );
-    }
-    refetch();
-  } catch (err) {
-    alert(`❌ ${err.message || 'An error occurred while recording status.'}`);
-  } finally {
-    setConfirmingOwnerId(null);
-  }
-};
-
-  const handleVerifyOwnerPresence = async (ownerEmail) => {
-  const ok = window.confirm(
-    `Confirm that ${ownerEmail} is active and reachable?\n\n` +
-    `This records a positive presence check. The owner will be notified.`
-  );
-  if (!ok) return;
-
-  try {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) throw new Error('Authentication session expired');
-
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const res = await fetch(`${supabaseUrl}/functions/v1/verify-presence`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${session.access_token}`,
-        'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-      },
-      body: JSON.stringify({ owner_email: ownerEmail }),
-    });
-
-    const result = await res.json();
-    if (!res.ok) throw new Error(result.error || 'Failed to record presence');
-
-    alert(`✅ Presence verified for ${ownerEmail}.`);
-  } catch (err) {
-    alert(`❌ ${err.message || 'Could not record presence check.'}`);
-  }
-};
   const handleDownloadData = async (requestId) => {
     if (!requestId) {
       alert('❌ No active emergency request found for this packet.');
@@ -320,7 +267,7 @@ export default function Dashboard({ user, onLogout, onNavigate }) {
               </div>
             </div>
 
-            {/* SECTION 1: YOUR PACKETS (OWNER) — unchanged */}
+            {/* SECTION 1: YOUR PACKETS (OWNER) */}
             {(activeTab === 'all' || activeTab === 'owned') && (
               <section className="space-y-4">
                 <div className="flex items-center justify-between">
@@ -382,138 +329,134 @@ export default function Dashboard({ user, onLogout, onNavigate }) {
               </section>
             )}
 
-          {/* SECTION 2: YOU ARE TRUSTED — GROUPED BY OWNER */}
-{(activeTab === 'all' || activeTab === 'trusted') && (
-  <section className="space-y-4 pt-4">
-    <div className="flex items-center justify-between">
-      <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-        <Shield className="text-[#FF8C00]" size={22} />
-        You are Trusted{' '}
-        <span className="text-xs font-bold text-gray-400 bg-gray-100 px-2.5 py-0.5 rounded-full">
-          {trustedPackets.length}
-        </span>
-      </h2>
-    </div>
-
-    {trustedPackets.length === 0 ? (
-      <div className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm text-center">
-        <div className="w-16 h-16 bg-orange-50 text-[#FF8C00] rounded-2xl flex items-center justify-center mx-auto mb-4">
-          <Inbox size={32} />
-        </div>
-        <h3 className="font-bold text-lg text-gray-900 mb-1">
-          You are not added as trusted anywhere yet
-        </h3>
-        <p className="text-gray-500 text-sm max-w-md mx-auto">
-          When an account owner adds your email address as a trusted contact,
-          their packets will appear here so you can assist in consensus
-          procedures.
-        </p>
-      </div>
-    ) : (
-      <div className="grid sm:grid-cols-2 gap-4">
-        {Object.entries(
-          trustedPackets.reduce((acc, p) => {
-            const key = p.owner_email || p.user_id || 'unknown';
-            if (!acc[key]) acc[key] = [];
-            acc[key].push(p);
-            return acc;
-          }, {})
-        ).map(([ownerKey, packets]) => {
-          const emergencyPackets = packets.filter((p) => p.category === 'emergency');
-          const anyEmergencyBusy = packets.some(
-            (p) => requestingPacketId === p.id
-          );
-          const confirmBusy =
-            confirmingOwnerId === ownerKey;
-          return (
-            <div
-              key={ownerKey}
-              className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm flex flex-col justify-between gap-4"
-            >
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-bold px-3 py-1 bg-gray-100 text-gray-700 rounded-full">
-                    {packets.length} packet{packets.length !== 1 ? 's' : ''}
-                  </span>
-                  <span className="text-xs font-semibold text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-full">
-                    Trusted Status Verified
-                  </span>
+            {/* SECTION 2: YOU ARE TRUSTED — GROUPED BY OWNER */}
+            {(activeTab === 'all' || activeTab === 'trusted') && (
+              <section className="space-y-4 pt-4">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                    <Shield className="text-[#FF8C00]" size={22} />
+                    You are Trusted{' '}
+                    <span className="text-xs font-bold text-gray-400 bg-gray-100 px-2.5 py-0.5 rounded-full">
+                      {trustedPackets.length}
+                    </span>
+                  </h2>
                 </div>
-                <p className="text-xs text-[#FF8C00] font-semibold mb-2">
-                  Owner: {ownerKey}
-                </p>
 
-                <ul className="space-y-1 mb-4">
-                  {packets.map((p) => (
-                    <li
-                      key={p.id}
-                      className="flex items-center gap-2 text-sm text-gray-800"
-                    >
-                      <FileText size={14} className="text-gray-400 shrink-0" />
-                      <span className="font-medium truncate">
-                        {p.title || p.name || 'Untitled Packet'}
-                      </span>
-                      <span
-                        className={`text-[10px] px-1.5 py-0.5 rounded-full shrink-0 ${
-                          p.category === 'emergency'
-                            ? 'bg-red-50 text-red-600'
-                            : 'bg-gray-100 text-gray-500'
-                        }`}
-                      >
-                        {p.category || 'normal'}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+                {trustedPackets.length === 0 ? (
+                  <div className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm text-center">
+                    <div className="w-16 h-16 bg-orange-50 text-[#FF8C00] rounded-2xl flex items-center justify-center mx-auto mb-4">
+                      <Inbox size={32} />
+                    </div>
+                    <h3 className="font-bold text-lg text-gray-900 mb-1">
+                      You are not added as trusted anywhere yet
+                    </h3>
+                    <p className="text-gray-500 text-sm max-w-md mx-auto">
+                      When an account owner adds your email address as a trusted contact,
+                      their packets will appear here so you can assist in consensus
+                      procedures.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    {Object.entries(
+                      trustedPackets.reduce((acc, p) => {
+                        const key = p.owner_email || p.user_id || 'unknown';
+                        if (!acc[key]) acc[key] = [];
+                        acc[key].push(p);
+                        return acc;
+                      }, {})
+                    ).map(([ownerKey, packets]) => {
+                      const emergencyPackets = packets.filter((p) => p.category === 'emergency');
+                      const anyEmergencyBusy = packets.some(
+                        (p) => requestingPacketId === p.id
+                      );
+                      return (
+                        <div
+                          key={ownerKey}
+                          className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm flex flex-col justify-between gap-4"
+                        >
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-xs font-bold px-3 py-1 bg-gray-100 text-gray-700 rounded-full">
+                                {packets.length} packet{packets.length !== 1 ? 's' : ''}
+                              </span>
+                              <span className="text-xs font-semibold text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-full">
+                                Trusted Status Verified
+                              </span>
+                            </div>
+                            <p className="text-xs text-[#FF8C00] font-semibold mb-2">
+                              Owner: {ownerKey}
+                            </p>
 
-              <div className="pt-3 border-t border-gray-50 space-y-2">
-                {emergencyPackets.length > 0 && (
-                  <button
-                    disabled={anyEmergencyBusy}
-                    onClick={() =>
-                      handleRequestEmergency(
-                        emergencyPackets[0].id,
-                        emergencyPackets[0].title || 'this packet'
-                      )
-                    }
-                    className="w-full py-3 px-6 rounded-full text-sm font-bold border-2 border-[#FF8C00] text-[#FF8C00] hover:bg-orange-50 transition flex items-center justify-center gap-2 disabled:opacity-50"
-                  >
-                    <ShieldAlert size={18} />
-                    {anyEmergencyBusy
-                      ? 'Submitting Request...'
-                      : 'Request Emergency Packet'}
-                  </button>
+                            <ul className="space-y-1 mb-4">
+                              {packets.map((p) => (
+                                <li
+                                  key={p.id}
+                                  className="flex items-center gap-2 text-sm text-gray-800"
+                                >
+                                  <FileText size={14} className="text-gray-400 shrink-0" />
+                                  <span className="font-medium truncate">
+                                    {p.title || p.name || 'Untitled Packet'}
+                                  </span>
+                                  <span
+                                    className={`text-[10px] px-1.5 py-0.5 rounded-full shrink-0 ${
+                                      p.category === 'emergency'
+                                        ? 'bg-red-50 text-red-600'
+                                        : 'bg-gray-100 text-gray-500'
+                                    }`}
+                                  >
+                                    {p.category || 'normal'}
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+
+                          <div className="pt-3 border-t border-gray-50 space-y-2">
+                            {emergencyPackets.length > 0 && (
+                              <button
+                                disabled={anyEmergencyBusy}
+                                onClick={() =>
+                                  handleRequestEmergency(
+                                    emergencyPackets[0].id,
+                                    emergencyPackets[0].title || 'this packet'
+                                  )
+                                }
+                                className="w-full py-3 px-6 rounded-full text-sm font-bold border-2 border-[#FF8C00] text-[#FF8C00] hover:bg-orange-50 transition flex items-center justify-center gap-2 disabled:opacity-50"
+                              >
+                                <ShieldAlert size={18} />
+                                {anyEmergencyBusy
+                                  ? 'Submitting Request...'
+                                  : 'Request Emergency Packet'}
+                              </button>
+                            )}
+
+                            <button
+                              onClick={() => handleVerifyOwnerPresence(ownerKey)}
+                              className="w-full py-2 px-6 rounded-full text-xs font-semibold text-gray-600 hover:bg-gray-50 transition flex items-center justify-center gap-2"
+                            >
+                              <Eye size={14} />
+                              Verify Owner Presence
+                            </button>
+
+                            <button
+                              onClick={() => handleConfirmOwnerStatus(ownerKey, packets)}
+                              title="Report the owner as unreachable"
+                              className="w-full py-3 px-6 rounded-full text-sm font-bold border-2 border-amber-400 text-amber-700 bg-amber-50 hover:bg-amber-100 transition flex items-center justify-center gap-2"
+                            >
+                              <CheckCircle2 size={18} />
+                              Confirm Owner Status
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 )}
+              </section>
+            )}
 
-                <button
-                  onClick={() => handleVerifyOwnerPresence(ownerKey)}
-                  className="w-full py-2 px-6 rounded-full text-xs font-semibold text-gray-600 hover:bg-gray-50 transition flex items-center justify-center gap-2"
-                >
-                  <Eye size={14} />
-                  Verify Owner Presence
-                </button>
-
-                <button
-                  disabled={confirmBusy}
-                  onClick={() => handleConfirmOwnerStatus(ownerKey, packets)}
-                  title="Report the owner as unreachable"
-                  className="w-full py-3 px-6 rounded-full text-sm font-bold border-2 border-amber-400 text-amber-700 bg-amber-50 hover:bg-amber-100 transition flex items-center justify-center gap-2 disabled:opacity-50"
-                >
-                  <CheckCircle2 size={18} />
-                  {confirmBusy ? 'Submitting...' : 'Confirm Owner Status'}
-                </button>
-              </div>
-
-            </div>
-          );
-        })}
-      </div>
-    )}
-  </section>
-)}
-
-            {/* SECTION 3: YOU ARE NOMINEE — countdown fixed */}
+            {/* SECTION 3: YOU ARE NOMINEE */}
             {(activeTab === 'all' || activeTab === 'nominee') && (
               <section className="space-y-4 pt-4">
                 <div className="flex items-center justify-between">
@@ -592,6 +535,107 @@ export default function Dashboard({ user, onLogout, onNavigate }) {
           </div>
         )}
       </main>
+
+      <StatusConfirmModal
+        target={statusConfirmTarget}
+        onClose={() => setStatusConfirmTarget(null)}
+      />
     </motion.div>
+  );
+}
+
+// ---------------------------------------------------------------
+// StatusConfirmModal — the amber confirm dialog opened by
+// "Confirm Owner Status". Explains the seriousness of the action,
+// requires a checkbox, and navigates to /support/death-claim.
+// ---------------------------------------------------------------
+function StatusConfirmModal({ target, onClose }) {
+  const [checked, setChecked] = useState(false);
+
+  if (!target) return null;
+
+  const handleContinue = () => {
+    const packetIds = target.packets.map((p) => p.id).join(',');
+    const url =
+      `/support/death-claim?owner_email=${encodeURIComponent(target.ownerEmail)}` +
+      `&packet_ids=${packetIds}`;
+    onClose();
+    window.location.href = url;
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center px-4 py-10 overflow-y-auto">
+      <div className="bg-white rounded-3xl max-w-2xl w-full p-8 shadow-2xl">
+        <h2 className="text-2xl font-bold text-gray-900 mb-3">
+          Confirm Owner Status
+        </h2>
+
+        <div className="space-y-4 text-sm text-gray-700 mb-6">
+          <p>
+            You are about to report that <strong>{target.ownerEmail}</strong> is
+            no longer alive.
+          </p>
+
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+            <p className="font-semibold text-amber-900 mb-2">
+              This is a serious action.
+            </p>
+            <ul className="list-disc pl-5 space-y-1 text-amber-900">
+              <li>
+                Filing a false report may be <strong>illegal</strong> and can
+                lead to civil or criminal liability.
+              </li>
+              <li>
+                This will <strong>not</strong> release data immediately. A
+                support team will verify documentation first.
+              </li>
+              <li>
+                You will be asked to upload a <strong>death certificate</strong> or
+                equivalent document.
+              </li>
+              <li>
+                Nominees will only be notified <strong>after</strong> verification
+                is complete.
+              </li>
+            </ul>
+          </div>
+
+          <p>
+            By checking the box below, you confirm that you have reason to
+            believe the owner is deceased, and that the information you provide
+            will be true and accurate.
+          </p>
+
+          <label className="flex items-start gap-3 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={checked}
+              onChange={(e) => setChecked(e.target.checked)}
+              className="mt-1 w-4 h-4"
+            />
+            <span className="text-sm text-gray-700">
+              I understand this is a formal report and I take responsibility for
+              its accuracy.
+            </span>
+          </label>
+        </div>
+
+        <div className="flex gap-3 justify-end">
+          <button
+            onClick={onClose}
+            className="px-6 py-2.5 rounded-full border border-gray-300 text-gray-700 font-semibold hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            disabled={!checked}
+            onClick={handleContinue}
+            className="px-6 py-2.5 rounded-full bg-amber-500 text-white font-semibold hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Continue to Support Form
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
