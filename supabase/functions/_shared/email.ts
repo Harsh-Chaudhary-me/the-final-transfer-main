@@ -1,9 +1,11 @@
+import { renderEmail, type RenderEmailOptions } from "./emailTemplate.ts";
+
 export async function sendEmail(to: string, subject: string, html: string) {
   const apiKey = Deno.env.get("RESEND_API_KEY");
   const from =
     Deno.env.get("EMAIL_FROM") ??
     "The Final Transfer <no-reply@thefinaltransfer.tech>";
-  const override = Deno.env.get("EMAIL_OVERRIDE"); // test override
+  const override = Deno.env.get("EMAIL_OVERRIDE");
 
   if (!apiKey) {
     console.error("[email] RESEND_API_KEY not set");
@@ -45,8 +47,7 @@ export async function sendEmail(to: string, subject: string, html: string) {
 export async function sendTemplatedEmail(
   to: string,
   subject: string,
-  opts: import("./emailTemplate.ts").RenderEmailOptions
+  opts: RenderEmailOptions
 ) {
-  const { renderEmail } = await import("./emailTemplate.ts");
   return sendEmail(to, subject, renderEmail(opts));
 }

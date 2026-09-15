@@ -1,6 +1,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { sendTemplatedEmail } from "../_shared/email.ts";
 
+console.log("[release-emergency] module loaded at", new Date().toISOString());
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -15,207 +17,169 @@ Deno.serve(async (req: Request) => {
     return new Response("ok", { headers: corsHeaders });
 
   try {
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: "No auth header" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    console.log("[release-emergency] handler entered");
 
-    const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
-    const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
-    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-
-    // Auth the caller
-    const authClient = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const {
-      data: { user },
-      error: authError,
-    } = await authClient.auth.getUser();
-
-    if (authError || !user || !user.email) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const body = await req.json().catch(() => ({}));
-    const packetId: string | undefined = body?.packet_id;
-    if (!packetId) {
-      return new Response(JSON.stringify({ error: "packet_id required" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const admin = createClient(supabaseUrl, serviceKey);
-    const callerEmail = user.email.toLowerCase();
-
-    // 1. Load packet
-    const { data: packet, error: packetErr } = await admin
-      .from("packets")
-      .select("id, user_id, title, category")
-      .eq("id", packetId)
-      .maybeSingle();
-
-    if (packetErr || !packet) {
-      return new Response(JSON.stringify({ error: "Packet not found" }), {
-        status: 404,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // 2. Only emergency packets support emergency access
-    if (packet.category !== "emergency") {
-      return new Response(
-        JSON.stringify({ error: "Not an emergency packet" }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
-    }
-
-    // 3. Caller must be an ACCEPTED trusted for this owner
-    const { data: myTrust } = await admin
-      .from("trusted_nominees")
-      .select("id")
-      .eq("user_id", packet.user_id)
-      .eq("email", callerEmail)
-      .eq("status", "ACCEPTED")
-      .maybeSingle();
-
-    if (!myTrust) {
-      return new Response(
-        JSON.stringify({ error: "Not an accepted trusted contact" }),
-        {
+    // Optional cron-secret guard. If CRON_SECRET is set, require it.
+    // If it's not set, allow the call (for manual testing from the dashboard).
+    const cronSecret = Deno.env.get("CRON_SECRET");
+    if (cronSecret) {
+      const authHeader = req.headers.get("Authorization") ?? "";
+      if (authHeader !== `Bearer ${cronSecret}`) {
+        console.error("[release-emergency] rejected: bad/missing cron secret");
+        return new Response(JSON.stringify({ error: "Forbidden" }), {
           status: 403,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
-    }
-
-    // 4. Refuse if there's already a pending/scheduled request for this packet
-    const { data: existing } = await admin
-      .from("web_emergency_requests")
-      .select("id, status")
-      .eq("packet_id", packet.id)
-      .in("status", ["pending", "scheduled"])
-      .limit(1)
-      .maybeSingle();
-
-    if (existing) {
-      return new Response(
-        JSON.stringify({
-          success: true,
-          request_id: existing.id,
-          message: "A request is already in progress",
-        }),
-        {
-          status: 200,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
-    }
-
-    // 5. Create the request
-    //    vote_deadline = now + 6h (the voting window)
-    //    release_at stays null until all trusted vote yes
-    const voteDeadline = new Date(
-      Date.now() + 6 * 60 * 60 * 1000
-    ).toISOString();
-
-    const { data: request, error: reqErr } = await admin
-      .from("web_emergency_requests")
-      .insert({
-        packet_id: packet.id,
-        requester_email: callerEmail,
-        status: "pending",
-        vote_deadline: voteDeadline,
-      })
-      .select("id")
-      .single();
-
-    if (reqErr || !request) {
-      console.error("[request-emergency] insert:", reqErr);
-      return new Response(
-        JSON.stringify({ error: reqErr?.message || "Failed to create request" }),
-        {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
-    }
-
-    // 6. Get all ACCEPTED trusted for this owner (except the requester)
-    const { data: allTrusted } = await admin
-      .from("trusted_nominees")
-      .select("email")
-      .eq("user_id", packet.user_id)
-      .eq("status", "ACCEPTED");
-
-    const recipients = (allTrusted ?? [])
-      .map((t: any) => t.email?.toLowerCase())
-      .filter((e: string | undefined): e is string => !!e && e !== callerEmail);
-
-    const voteLink = `${WEB_BASE_URL}/trusted/vote?requestId=${request.id}`;
-
-    // 7. Notify each voter — in-app + email
-    for (const trustedEmail of recipients) {
-      await admin.from("web_notifications").insert({
-        user_email: trustedEmail,
-        title: "Emergency vote requested",
-        message: `${callerEmail} requested emergency access to "${packet.title}". Please review and vote.`,
-        link: `/trusted/vote?requestId=${request.id}`,
-      });
-
-      try {
-        await sendTemplatedEmail(
-          trustedEmail,
-          "Emergency vote requested — The Final Transfer",
-          {
-            title: "Emergency Vote Requested",
-            preheader: `${callerEmail} requested emergency access to "${packet.title}".`,
-            body: `
-              <p><strong>${callerEmail}</strong> has requested emergency access to the packet <strong>${packet.title}</strong>.</p>
-              <p>As a Trusted Person, please review and cast your vote. If all Trusted Persons approve, the packet will be released to the nominee after a short window.</p>
-            `,
-            primaryCta: {
-              label: "Vote Now",
-              url: voteLink,
-            },
-            footnote:
-              "If the vote is not completed before the deadline, the request will expire.",
-            privacyNote:
-              "Your vote is only visible in aggregate — individual votes are not disclosed to other Trusted Persons.",
-          }
-        );
-      } catch (emailErr) {
-        console.error(
-          "[request-emergency] email failed for",
-          trustedEmail,
-          emailErr
-        );
+        });
       }
     }
 
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    const admin = createClient(supabaseUrl, serviceKey);
+
+    const now = new Date().toISOString();
+
+    // 1. Find all requests that are scheduled and due
+    const { data: requests, error: rErr } = await admin
+      .from("web_emergency_requests")
+      .select("id, packet_id, status, release_at")
+      .eq("status", "scheduled")
+      .lte("release_at", now);
+
+    if (rErr) {
+      console.error("[release-emergency] select failed:", rErr);
+      return new Response(JSON.stringify({ error: rErr.message }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (!requests || requests.length === 0) {
+      console.log("[release-emergency] nothing to release");
+      return new Response(JSON.stringify({ success: true, released: 0 }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    console.log(
+      "[release-emergency] found scheduled requests:",
+      requests.length
+    );
+
+    let releasedCount = 0;
+
+    for (const req of requests) {
+      console.log("[release-emergency] processing request:", req.id);
+
+      // 2. Load the packet with nominees
+      const { data: packet, error: pErr } = await admin
+        .from("packets")
+        .select("id, title, nominees")
+        .eq("id", req.packet_id)
+        .maybeSingle();
+
+      if (pErr || !packet) {
+        console.error(
+          "[release-emergency] packet not found for request",
+          req.id,
+          pErr
+        );
+        continue;
+      }
+
+      // 3. Flip request to released
+      const { error: updErr } = await admin
+        .from("web_emergency_requests")
+        .update({ status: "released" })
+        .eq("id", req.id)
+        .eq("status", "scheduled"); // guard against double-fire
+
+      if (updErr) {
+        console.error(
+          "[release-emergency] failed to update request",
+          req.id,
+          updErr
+        );
+        continue;
+      }
+
+      // 4. Parse nominees
+      let nominees: any[] = packet.nominees ?? [];
+      if (typeof nominees === "string") {
+        try {
+          nominees = JSON.parse(nominees);
+        } catch {
+          nominees = [];
+        }
+      }
+      if (!Array.isArray(nominees)) nominees = [];
+
+      const downloadLink = `${WEB_BASE_URL}/nominee/download?requestId=${req.id}`;
+
+      // 5. Notify each nominee
+      for (const n of nominees) {
+        const email = typeof n === "string" ? n : n?.email;
+        if (!email) continue;
+        const emailLower = email.toLowerCase();
+
+        // In-app notification
+        await admin.from("web_notifications").insert({
+          user_email: emailLower,
+          title: "Data release authorized",
+          message: `The emergency packet "${packet.title}" has been released. Your files are ready.`,
+          link: `/nominee/download?requestId=${req.id}`,
+        });
+
+        // Email
+        try {
+          await sendTemplatedEmail(
+            emailLower,
+            "Emergency release authorized — The Final Transfer",
+            {
+              title: "Emergency Data Release",
+              preheader: `Emergency access has been authorized for "${packet.title}".`,
+              body: `
+                <p>The Trusted Persons for <strong>${packet.title}</strong> have unanimously authorized emergency release of this packet.</p>
+                <p>Your files are ready to download and remain available any time.</p>
+              `,
+              primaryCta: {
+                label: "Open Download Page",
+                url: downloadLink,
+              },
+              privacyNote:
+                "If you were not expecting this, contact the packet owner or support.",
+            }
+          );
+          console.log(
+            "[release-emergency] notified nominee:",
+            emailLower
+          );
+        } catch (emailErr: any) {
+          console.error(
+            "[release-emergency] nominee email failed for",
+            emailLower,
+            emailErr?.message
+          );
+        }
+      }
+
+      releasedCount++;
+      console.log("[release-emergency] released request:", req.id);
+    }
+
+    console.log("[release-emergency] done. released:", releasedCount);
+
     return new Response(
-      JSON.stringify({
-        success: true,
-        request_id: request.id,
-        notified: recipients.length,
-      }),
+      JSON.stringify({ success: true, released: releasedCount }),
       {
         status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       }
     );
   } catch (err: any) {
-    console.error("[request-emergency] fatal:", err);
+    console.error("[release-emergency] fatal:", err?.message);
+    console.error("[release-emergency] fatal stack:", err?.stack);
     return new Response(
       JSON.stringify({ error: err.message || "Server error" }),
       {

@@ -1,7 +1,7 @@
 // Shared HTML email template for The Final Transfer.
 // Every email in the system renders through renderEmail() so they all
 // share the same header, colors, typography, and footer.
-
+console.log("[emailTemplate] module loaded at", new Date().toISOString());
 const COLORS = {
   headerFrom: "#FF9E2C",
   headerTo: "#F47B20",
