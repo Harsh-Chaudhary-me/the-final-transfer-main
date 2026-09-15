@@ -53,21 +53,23 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    if (request.status !== "released") {
+    // 2. Release gate — accept "released" always, or "scheduled" if release_at has passed.
+    const now = Date.now();
+    const releaseTime = request.release_at ? new Date(request.release_at).getTime() : null;
+
+    const isReleased = request.status === "released";
+    const isScheduledAndDue =
+      request.status === "scheduled" && releaseTime !== null && releaseTime <= now;
+
+    if (!isReleased && !isScheduledAndDue) {
       return new Response(JSON.stringify({ error: "Not released yet" }), {
         status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // 2. Check 6-hour window
-    const releaseTime = new Date(request.release_at).getTime();
-    const now = Date.now();
-    const windowEnd = releaseTime + 6 * 60 * 60 * 1000;
-    if (now > windowEnd) {
-      return new Response(JSON.stringify({ error: "Download window expired" }), {
-        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    // NOTE: No upper-bound / expiry check. Once released, downloads stay
+    // available indefinitely. Signed URLs themselves are short-lived and
+    // regenerated on every request.
 
     // 3. Fetch packet with files
     const { data: packet } = await admin
@@ -107,7 +109,7 @@ Deno.serve(async (req: Request) => {
     }
     if (!Array.isArray(files)) files = [];
 
-    // 6. Generate signed URLs (6-hour expiry)
+    // 6. Generate signed URLs — short TTL per URL; regenerated on each request.
     const signedUrls: any[] = [];
     for (const f of files) {
       const path = typeof f === "string" ? f : (f?.path || f?.name);
@@ -115,7 +117,7 @@ Deno.serve(async (req: Request) => {
 
       const { data: signed } = await admin.storage
         .from("packets")
-        .createSignedUrl(path, 21600); // 6 hours
+        .createSignedUrl(path, 21600); // 6 hours — URL lifetime, not access window
 
       if (signed?.signedUrl) {
         signedUrls.push({
@@ -125,13 +127,10 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    const expiresAt = new Date(windowEnd).toISOString();
-
     return new Response(JSON.stringify({
       success: true,
       packet_title: packet.title,
       files: signedUrls,
-      expires_at: expiresAt,
     }), {
       status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

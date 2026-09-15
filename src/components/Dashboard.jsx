@@ -3,8 +3,8 @@ import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import myLogo from '../assets/logo.svg';
 import { supabase } from '../supabase';
-import { 
-  FileText, ChevronRight, Lock, 
+import {
+  FileText, ChevronRight, Lock,
   Clock, Download, User as UserIcon, Shield,
   ShieldAlert, CheckCircle2, AlertCircle, PlusCircle, UserCheck, Inbox,
   Bell, Eye
@@ -34,6 +34,7 @@ async function fetchDashboard() {
 export default function Dashboard({ user, onLogout, onNavigate }) {
   const [activeTab, setActiveTab] = useState('all');
   const [requestingPacketId, setRequestingPacketId] = useState(null);
+  const [confirmingPacketId, setConfirmingPacketId] = useState(null);
   const [downloadingRequestId, setDownloadingRequestId] = useState(null);
   const [unreadCount, setUnreadCount] = useState(0);
 
@@ -41,14 +42,13 @@ export default function Dashboard({ user, onLogout, onNavigate }) {
     queryKey: ['dashboard'],
     queryFn: fetchDashboard,
     enabled: !!user,
-    refetchInterval: 30000, // auto-refresh every 30s
+    refetchInterval: 30000,
   });
 
   const ownedPackets = data?.ownedPackets || [];
   const trustedPackets = data?.trustedPackets || [];
   const nomineePackets = data?.nomineePackets || [];
 
-  // Fetch unread notification count
   useEffect(() => {
     if (!user?.email) return;
     const loadUnread = async () => {
@@ -91,6 +91,45 @@ export default function Dashboard({ user, onLogout, onNavigate }) {
       alert(`❌ ${err.message || 'An error occurred while requesting emergency access.'}`);
     } finally {
       setRequestingPacketId(null);
+    }
+  };
+
+  const handleConfirmOwnerStatus = async (packet) => {
+    const ok = window.confirm(
+      `Report the owner of "${packet.title}" as unreachable?\n\n` +
+      `This will notify all nominees of this packet and start the data release. ` +
+      `Only proceed if you are confident something has happened to the owner.`
+    );
+    if (!ok) return;
+
+    setConfirmingPacketId(packet.id);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Authentication session expired');
+
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const res = await fetch(`${supabaseUrl}/functions/v1/confirm-status`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify({ packet_id: packet.id }),
+      });
+
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || 'Failed to confirm owner status');
+
+      alert(
+        `✅ Owner status recorded for "${packet.title}".\n\n` +
+        `${result.notified ?? 0} nominee(s) have been notified and can now access the packet.`
+      );
+      refetch();
+    } catch (err) {
+      alert(`❌ ${err.message || 'An error occurred while recording status.'}`);
+    } finally {
+      setConfirmingPacketId(null);
     }
   };
 
@@ -138,19 +177,14 @@ export default function Dashboard({ user, onLogout, onNavigate }) {
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="min-h-screen bg-[#FDF9F1] text-gray-800 pb-20 selection:bg-[#FF8C00] selection:text-white">
-      {/* Top Header */}
       <header className="bg-white shadow-sm border-b border-gray-100 py-4 px-6 fixed top-0 w-full z-30">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
           <a href="/" className="flex items-center gap-2 text-[#FF8C00] font-bold text-xl hover:opacity-90 transition-opacity">
-            <img 
-              src={myLogo} 
-              alt="The Final Transfer Logo" 
-              className="h-10 w-auto object-contain" 
-            />
+            <img src={myLogo} alt="The Final Transfer Logo" className="h-10 w-auto object-contain" />
           </a>
           <div className="flex items-center gap-4">
             <button
-  onClick={() => onNavigate?.('notifications')}
+              onClick={() => onNavigate?.('notifications')}
               className="relative p-2 rounded-full hover:bg-gray-100 transition"
               aria-label="Notifications"
             >
@@ -172,7 +206,6 @@ export default function Dashboard({ user, onLogout, onNavigate }) {
         </div>
       </header>
 
-      {/* Main Content */}
       <main className="max-w-6xl mx-auto pt-28 px-4 sm:px-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
           <div>
@@ -180,7 +213,6 @@ export default function Dashboard({ user, onLogout, onNavigate }) {
             <p className="text-gray-500 text-sm mt-1">Manage your zero-knowledge packets and trusted designations.</p>
           </div>
 
-          {/* Section Filter Tabs */}
           <div className="flex space-x-1.5 bg-gray-200/60 p-1.5 rounded-full w-fit">
             {[
               { id: 'all', label: 'All Sections' },
@@ -203,7 +235,6 @@ export default function Dashboard({ user, onLogout, onNavigate }) {
           </div>
         </div>
 
-        {/* Loading State */}
         {isLoading && (
           <div className="py-20 text-center">
             <div className="w-12 h-12 border-4 border-orange-200 border-t-[#FF8C00] rounded-full animate-spin mx-auto mb-4"></div>
@@ -211,7 +242,6 @@ export default function Dashboard({ user, onLogout, onNavigate }) {
           </div>
         )}
 
-        {/* Error State */}
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 p-6 rounded-3xl mb-8 flex justify-between items-center">
             <div>
@@ -226,7 +256,6 @@ export default function Dashboard({ user, onLogout, onNavigate }) {
 
         {!isLoading && !error && (
           <div className="space-y-12 animate-in fade-in duration-500">
-            {/* Mobile App Promo Banner */}
             <div className="bg-gradient-to-r from-[#FF8C00] to-[#FF6A00] text-white p-6 sm:p-8 rounded-3xl shadow-xl shadow-orange-500/10 flex flex-col sm:flex-row items-center justify-between gap-6">
               <div>
                 <span className="text-xs font-bold uppercase tracking-widest text-orange-200 block mb-1">The Final Transfer Vault</span>
@@ -245,7 +274,7 @@ export default function Dashboard({ user, onLogout, onNavigate }) {
               </div>
             </div>
 
-            {/* SECTION 1: YOUR PACKETS (OWNER) */}
+            {/* SECTION 1: YOUR PACKETS (OWNER) — unchanged */}
             {(activeTab === 'all' || activeTab === 'owned') && (
               <section className="space-y-4">
                 <div className="flex items-center justify-between">
@@ -307,7 +336,7 @@ export default function Dashboard({ user, onLogout, onNavigate }) {
               </section>
             )}
 
-            {/* SECTION 2: YOU ARE TRUSTED (TRUSTED MEMBER) */}
+            {/* SECTION 2: YOU ARE TRUSTED — CHANGED */}
             {(activeTab === 'all' || activeTab === 'trusted') && (
               <section className="space-y-4 pt-4">
                 <div className="flex items-center justify-between">
@@ -334,7 +363,7 @@ export default function Dashboard({ user, onLogout, onNavigate }) {
                         <div>
                           <div className="flex items-center justify-between mb-2">
                             <span className="text-xs font-bold px-3 py-1 bg-gray-100 text-gray-700 rounded-full">
-                              {packet.category || 'Emergency'}
+                              {packet.category || 'General'}
                             </span>
                             <span className="text-xs font-semibold text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-full">
                               Trusted Status Verified
@@ -344,25 +373,36 @@ export default function Dashboard({ user, onLogout, onNavigate }) {
                             Owner: {packet.owner_email || packet.user_id || 'Registered User'}
                           </p>
                           <h4 className="font-bold text-xl text-gray-900">
-                            {packet.title || packet.name || 'Emergency Instructions'}
+                            {packet.title || packet.name || 'Untitled Packet'}
                           </h4>
                         </div>
 
                         <div className="pt-3 border-t border-gray-50 space-y-2">
-                          <button
-                            disabled={requestingPacketId === packet.id}
-                            onClick={() => handleRequestEmergency(packet.id, packet.title || 'this packet')}
-                            className="w-full py-3 px-6 rounded-full text-sm font-bold border-2 border-[#FF8C00] text-[#FF8C00] hover:bg-orange-50 transition flex items-center justify-center gap-2 disabled:opacity-50"
-                          >
-                            <ShieldAlert size={18} />
-                            {requestingPacketId === packet.id ? 'Submitting Request...' : 'Request Emergency Access'}
-                          </button>
+                          {packet.category === 'emergency' && (
+                            <button
+                              disabled={requestingPacketId === packet.id}
+                              onClick={() => handleRequestEmergency(packet.id, packet.title || 'this packet')}
+                              className="w-full py-3 px-6 rounded-full text-sm font-bold border-2 border-[#FF8C00] text-[#FF8C00] hover:bg-orange-50 transition flex items-center justify-center gap-2 disabled:opacity-50"
+                            >
+                              <ShieldAlert size={18} />
+                              {requestingPacketId === packet.id ? 'Submitting Request...' : 'Request Emergency Access'}
+                            </button>
+                          )}
                           <button
                             onClick={() => handleVerifyOwnerPresence(packet.title, packet.owner_email)}
                             className="w-full py-2 px-6 rounded-full text-xs font-semibold text-gray-600 hover:bg-gray-50 transition flex items-center justify-center gap-2"
                           >
                             <Eye size={14} />
                             Verify Owner Presence
+                          </button>
+                          <button
+                            disabled={confirmingPacketId === packet.id}
+                            onClick={() => handleConfirmOwnerStatus(packet)}
+                            title="Report the owner as unreachable"
+                            className="w-full py-3 px-6 rounded-full text-sm font-bold border-2 border-amber-400 text-amber-700 bg-amber-50 hover:bg-amber-100 transition flex items-center justify-center gap-2 disabled:opacity-50"
+                          >
+                            <CheckCircle2 size={18} />
+                            {confirmingPacketId === packet.id ? 'Submitting...' : 'Confirm Owner Status'}
                           </button>
                         </div>
                       </div>
@@ -372,7 +412,7 @@ export default function Dashboard({ user, onLogout, onNavigate }) {
               </section>
             )}
 
-            {/* SECTION 3: YOU ARE NOMINEE (NOMINEE) */}
+            {/* SECTION 3: YOU ARE NOMINEE — countdown fixed */}
             {(activeTab === 'all' || activeTab === 'nominee') && (
               <section className="space-y-4 pt-4">
                 <div className="flex items-center justify-between">
@@ -397,7 +437,6 @@ export default function Dashboard({ user, onLogout, onNavigate }) {
                     {nomineePackets.map((packet) => {
                       const isReleased = packet.downloadActive || packet.download_active;
                       const requestId = packet.requestId || packet.request_id;
-                      const releaseAt = packet.release_at;
 
                       return (
                         <div key={packet.id} className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm flex flex-col sm:flex-row justify-between sm:items-center gap-4">
@@ -417,8 +456,11 @@ export default function Dashboard({ user, onLogout, onNavigate }) {
                                 <span className="font-medium">No action needed</span> — Encrypted until emergency release consensus
                               </div>
                             ) : (
-                              <div className="mt-2">
-                                <CountdownTimer releaseAt={releaseAt} />
+                              <div className="flex items-center gap-3 bg-emerald-50 px-4 py-2.5 rounded-2xl border border-emerald-200 w-fit">
+                                <CheckCircle2 size={20} className="text-emerald-600" />
+                                <div className="text-sm text-emerald-800 font-semibold">
+                                  Available to download
+                                </div>
                               </div>
                             )}
                           </div>
@@ -450,48 +492,5 @@ export default function Dashboard({ user, onLogout, onNavigate }) {
         )}
       </main>
     </motion.div>
-  );
-}
-
-function CountdownTimer({ releaseAt }) {
-  const [timeLeft, setTimeLeft] = useState(0);
-
-  useEffect(() => {
-    // If releaseAt provided, count to (releaseAt + 6 hours). Otherwise, default 6 hours from now.
-    const deadline = releaseAt
-      ? new Date(releaseAt).getTime() + 6 * 60 * 60 * 1000
-      : Date.now() + 6 * 60 * 60 * 1000;
-
-    const tick = () => {
-      const remaining = Math.max(0, Math.floor((deadline - Date.now()) / 1000));
-      setTimeLeft(remaining);
-    };
-
-    tick();
-    const timer = setInterval(tick, 1000);
-    return () => clearInterval(timer);
-  }, [releaseAt]);
-
-  if (timeLeft <= 0) {
-    return (
-      <div className="flex items-center gap-3 bg-gray-100 px-4 py-2.5 rounded-2xl border border-gray-200 w-fit">
-        <AlertCircle size={20} className="text-gray-500" />
-        <div className="text-sm text-gray-600 font-medium">Download window expired</div>
-      </div>
-    );
-  }
-
-  const hours = Math.floor(timeLeft / 3600);
-  const minutes = Math.floor((timeLeft % 3600) / 60);
-  const seconds = timeLeft % 60;
-
-  return (
-    <div className="flex items-center gap-3 bg-[#FF9EA2]/10 px-4 py-2.5 rounded-2xl border border-[#FF9EA2]/30 w-fit">
-      <Clock size={20} className="text-[#FF9EA2] animate-pulse" />
-      <div className="font-mono font-bold text-[#FF9EA2] tracking-wider text-lg">
-        {String(hours).padStart(2, '0')}:{String(minutes).padStart(2, '0')}:{String(seconds).padStart(2, '0')}
-      </div>
-      <div className="text-xs text-gray-600 font-medium">Download Window Active</div>
-    </div>
   );
 }

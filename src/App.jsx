@@ -15,6 +15,7 @@ import AuthModal from './components/AuthModal';
 import SetPasswordModal from './components/SetPasswordModal';
 import TrustedVotePage from './components/TrustedVotePage';
 import NomineeDownloadPage from './components/NomineeDownloadPage';
+import NomineeClaim from './components/NomineeClaim';
 import Notifications from './components/Notifications';
 
 // --- MOCK DATA (kept for LegalUploadPage demo use) ---
@@ -35,6 +36,7 @@ const MOCK_ASSIGNED = [
  */
 function resolveViewFromPath(pathname, hasUser) {
   if (pathname === '/trusted/invite') return 'trusted_invite';
+  if (pathname === '/nominee/claim') return 'nominee_claim';
   if (pathname === '/nominee/download') return 'nominee_download';
   if (pathname === '/trusted/vote') return 'trusted_vote';
   if (pathname === '/notifications') return 'notifications';
@@ -126,6 +128,7 @@ export default function App() {
         : view === 'trusted_portal' ? '/trusted'
         : view === 'trusted_vote' ? '/trusted/vote'
         : view === 'nominee_download' ? '/nominee/download'
+        : view === 'nominee_claim' ? '/nominee/claim'
         : view === 'legal' ? '/legal'
         : '/');
     window.history.pushState({}, '', url);
