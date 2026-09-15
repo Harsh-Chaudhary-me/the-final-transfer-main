@@ -46,26 +46,40 @@ export default function NomineeDownloadPage({ user, onBack, onLoginClick }) {
   };
 
   const download = async () => {
-    setDownloading(true);
-    setError("");
-    try {
-      const { data, error } = await supabase.functions.invoke("get-download-url", {
-        body: { requestId },
-      });
-      if (error) throw new Error(error.message);
-      if (data?.error) throw new Error(data.error);
+  setDownloading(true);
+  setError("");
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) throw new Error("Please log in again.");
 
-      setFiles(data.files || []);
-      // Auto-open first file — user already clicked Download, so opening is expected
-      if (data.files?.[0]?.url) {
-        window.open(data.files[0].url, "_blank");
+    const res = await fetch(
+      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/get-download-url`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+          apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify({ requestId }),
       }
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setDownloading(false);
+    );
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data?.error || `HTTP ${res.status}`);
     }
-  };
+
+    setFiles(data.files || []);
+    if (data.files?.[0]?.url) {
+      window.open(data.files[0].url, "_blank");
+    }
+  } catch (err) {
+    setError(err.message);
+  } finally {
+    setDownloading(false);
+  }
+};
 
   if (loading) {
     return (
