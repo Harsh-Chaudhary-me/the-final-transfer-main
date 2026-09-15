@@ -94,49 +94,82 @@ export default function Dashboard({ user, onLogout, onNavigate }) {
     }
   };
 
-  const handleConfirmOwnerStatus = async (packet) => {
-    const ok = window.confirm(
-      `Report the owner of "${packet.title}" as unreachable?\n\n` +
-      `This will notify all nominees of this packet and start the data release. ` +
-      `Only proceed if you are confident something has happened to the owner.`
-    );
-    if (!ok) return;
+ const handleConfirmOwnerStatus = async (ownerEmail, packets) => {
+  const packetCount = packets.length;
+  const firstTitle = packets[0]?.title || 'their packets';
 
-    setConfirmingPacketId(packet.id);
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) throw new Error('Authentication session expired');
+  const ok = window.confirm(
+    `Report ${ownerEmail} as unreachable?\n\n` +
+    `This will release ${packetCount} packet${packetCount !== 1 ? 's' : ''} ` +
+    `(starting with "${firstTitle}") and notify all nominees.\n\n` +
+    `Only proceed if you are confident something has happened to the owner.`
+  );
+  if (!ok) return;
 
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const res = await fetch(`${supabaseUrl}/functions/v1/confirm-status`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-        },
-        body: JSON.stringify({ packet_id: packet.id }),
-      });
+  setConfirmingOwnerId(ownerEmail);
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) throw new Error('Authentication session expired');
 
-      const result = await res.json();
-      if (!res.ok) throw new Error(result.error || 'Failed to confirm owner status');
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const res = await fetch(`${supabaseUrl}/functions/v1/confirm-status`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+        'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({ owner_email: ownerEmail }),
+    });
 
-      alert(
-        `✅ Owner status recorded for "${packet.title}".\n\n` +
-        `${result.notified ?? 0} nominee(s) have been notified and can now access the packet.`
-      );
-      refetch();
-    } catch (err) {
-      alert(`❌ ${err.message || 'An error occurred while recording status.'}`);
-    } finally {
-      setConfirmingPacketId(null);
+    const result = await res.json();
+    if (!res.ok) {
+      throw new Error(result.error || 'Failed to confirm owner status');
     }
-  };
 
-  const handleVerifyOwnerPresence = (packetTitle, ownerEmail) => {
-    alert(`✅ Presence verification recorded.\n\nYou confirmed the owner of "${packetTitle}" is active.\n\nThe owner (${ownerEmail}) has been notified that you verified their presence.`);
-  };
+    alert(
+      `✅ Owner status recorded for ${ownerEmail}.\n\n` +
+      `${result.packets_affected ?? packetCount} packet(s) released.\n` +
+      `${result.notified ?? 0} nominee(s) notified.`
+    );
+    refetch();
+  } catch (err) {
+    alert(`❌ ${err.message || 'An error occurred while recording status.'}`);
+  } finally {
+    setConfirmingOwnerId(null);
+  }
+};
 
+  const handleVerifyOwnerPresence = async (ownerEmail) => {
+  const ok = window.confirm(
+    `Confirm that ${ownerEmail} is active and reachable?\n\n` +
+    `This records a positive presence check. The owner will be notified.`
+  );
+  if (!ok) return;
+
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) throw new Error('Authentication session expired');
+
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const res = await fetch(`${supabaseUrl}/functions/v1/verify-presence`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+        'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({ owner_email: ownerEmail }),
+    });
+
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Failed to record presence');
+
+    alert(`✅ Presence verified for ${ownerEmail}.`);
+  } catch (err) {
+    alert(`❌ ${err.message || 'Could not record presence check.'}`);
+  }
+};
   const handleDownloadData = async (requestId) => {
     if (!requestId) {
       alert('❌ No active emergency request found for this packet.');
@@ -336,81 +369,135 @@ export default function Dashboard({ user, onLogout, onNavigate }) {
               </section>
             )}
 
-            {/* SECTION 2: YOU ARE TRUSTED — CHANGED */}
-            {(activeTab === 'all' || activeTab === 'trusted') && (
-              <section className="space-y-4 pt-4">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-                    <Shield className="text-[#FF8C00]" size={22} />
-                    You are Trusted <span className="text-xs font-bold text-gray-400 bg-gray-100 px-2.5 py-0.5 rounded-full">{trustedPackets.length}</span>
-                  </h2>
+          {/* SECTION 2: YOU ARE TRUSTED — GROUPED BY OWNER */}
+{(activeTab === 'all' || activeTab === 'trusted') && (
+  <section className="space-y-4 pt-4">
+    <div className="flex items-center justify-between">
+      <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+        <Shield className="text-[#FF8C00]" size={22} />
+        You are Trusted{' '}
+        <span className="text-xs font-bold text-gray-400 bg-gray-100 px-2.5 py-0.5 rounded-full">
+          {trustedPackets.length}
+        </span>
+      </h2>
+    </div>
+
+    {trustedPackets.length === 0 ? (
+      <div className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm text-center">
+        <div className="w-16 h-16 bg-orange-50 text-[#FF8C00] rounded-2xl flex items-center justify-center mx-auto mb-4">
+          <Inbox size={32} />
+        </div>
+        <h3 className="font-bold text-lg text-gray-900 mb-1">
+          You are not added as trusted anywhere yet
+        </h3>
+        <p className="text-gray-500 text-sm max-w-md mx-auto">
+          When an account owner adds your email address as a trusted contact,
+          their packets will appear here so you can assist in consensus
+          procedures.
+        </p>
+      </div>
+    ) : (
+      <div className="grid sm:grid-cols-2 gap-4">
+        {Object.entries(
+          trustedPackets.reduce((acc, p) => {
+            const key = p.owner_email || p.user_id || 'unknown';
+            if (!acc[key]) acc[key] = [];
+            acc[key].push(p);
+            return acc;
+          }, {})
+        ).map(([ownerKey, packets]) => {
+          const emergencyPackets = packets.filter((p) => p.category === 'emergency');
+          const anyEmergencyBusy = packets.some(
+            (p) => requestingPacketId === p.id
+          );
+          const confirmBusy =
+            confirmingOwnerId === ownerKey;
+          return (
+            <div
+              key={ownerKey}
+              className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm flex flex-col justify-between gap-4"
+            >
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold px-3 py-1 bg-gray-100 text-gray-700 rounded-full">
+                    {packets.length} packet{packets.length !== 1 ? 's' : ''}
+                  </span>
+                  <span className="text-xs font-semibold text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-full">
+                    Trusted Status Verified
+                  </span>
                 </div>
+                <p className="text-xs text-[#FF8C00] font-semibold mb-2">
+                  Owner: {ownerKey}
+                </p>
 
-                {trustedPackets.length === 0 ? (
-                  <div className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm text-center">
-                    <div className="w-16 h-16 bg-orange-50 text-[#FF8C00] rounded-2xl flex items-center justify-center mx-auto mb-4">
-                      <Inbox size={32} />
-                    </div>
-                    <h3 className="font-bold text-lg text-gray-900 mb-1">You are not added as trusted anywhere yet</h3>
-                    <p className="text-gray-500 text-sm max-w-md mx-auto">
-                      When an account owner adds your email address as a trusted contact, their packets will appear here so you can assist in consensus procedures.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="grid sm:grid-cols-2 gap-4">
-                    {trustedPackets.map((packet) => (
-                      <div key={packet.id} className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm flex flex-col justify-between gap-4">
-                        <div>
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="text-xs font-bold px-3 py-1 bg-gray-100 text-gray-700 rounded-full">
-                              {packet.category || 'General'}
-                            </span>
-                            <span className="text-xs font-semibold text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-full">
-                              Trusted Status Verified
-                            </span>
-                          </div>
-                          <p className="text-xs text-[#FF8C00] font-semibold mb-1">
-                            Owner: {packet.owner_email || packet.user_id || 'Registered User'}
-                          </p>
-                          <h4 className="font-bold text-xl text-gray-900">
-                            {packet.title || packet.name || 'Untitled Packet'}
-                          </h4>
-                        </div>
+                <ul className="space-y-1 mb-4">
+                  {packets.map((p) => (
+                    <li
+                      key={p.id}
+                      className="flex items-center gap-2 text-sm text-gray-800"
+                    >
+                      <FileText size={14} className="text-gray-400 shrink-0" />
+                      <span className="font-medium truncate">
+                        {p.title || p.name || 'Untitled Packet'}
+                      </span>
+                      <span
+                        className={`text-[10px] px-1.5 py-0.5 rounded-full shrink-0 ${
+                          p.category === 'emergency'
+                            ? 'bg-red-50 text-red-600'
+                            : 'bg-gray-100 text-gray-500'
+                        }`}
+                      >
+                        {p.category || 'normal'}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
 
-                        <div className="pt-3 border-t border-gray-50 space-y-2">
-                          {packet.category === 'emergency' && (
-                            <button
-                              disabled={requestingPacketId === packet.id}
-                              onClick={() => handleRequestEmergency(packet.id, packet.title || 'this packet')}
-                              className="w-full py-3 px-6 rounded-full text-sm font-bold border-2 border-[#FF8C00] text-[#FF8C00] hover:bg-orange-50 transition flex items-center justify-center gap-2 disabled:opacity-50"
-                            >
-                              <ShieldAlert size={18} />
-                              {requestingPacketId === packet.id ? 'Submitting Request...' : 'Request Emergency Access'}
-                            </button>
-                          )}
-                          <button
-                            onClick={() => handleVerifyOwnerPresence(packet.title, packet.owner_email)}
-                            className="w-full py-2 px-6 rounded-full text-xs font-semibold text-gray-600 hover:bg-gray-50 transition flex items-center justify-center gap-2"
-                          >
-                            <Eye size={14} />
-                            Verify Owner Presence
-                          </button>
-                          <button
-                            disabled={confirmingPacketId === packet.id}
-                            onClick={() => handleConfirmOwnerStatus(packet)}
-                            title="Report the owner as unreachable"
-                            className="w-full py-3 px-6 rounded-full text-sm font-bold border-2 border-amber-400 text-amber-700 bg-amber-50 hover:bg-amber-100 transition flex items-center justify-center gap-2 disabled:opacity-50"
-                          >
-                            <CheckCircle2 size={18} />
-                            {confirmingPacketId === packet.id ? 'Submitting...' : 'Confirm Owner Status'}
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+              <div className="pt-3 border-t border-gray-50 space-y-2">
+                {emergencyPackets.length > 0 && (
+                  <button
+                    disabled={anyEmergencyBusy}
+                    onClick={() =>
+                      handleRequestEmergency(
+                        emergencyPackets[0].id,
+                        emergencyPackets[0].title || 'this packet'
+                      )
+                    }
+                    className="w-full py-3 px-6 rounded-full text-sm font-bold border-2 border-[#FF8C00] text-[#FF8C00] hover:bg-orange-50 transition flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    <ShieldAlert size={18} />
+                    {anyEmergencyBusy
+                      ? 'Submitting Request...'
+                      : 'Request Emergency Access'}
+                  </button>
                 )}
-              </section>
-            )}
+
+                <button
+                  onClick={() => handleVerifyOwnerPresence(ownerKey)}
+                  className="w-full py-2 px-6 rounded-full text-xs font-semibold text-gray-600 hover:bg-gray-50 transition flex items-center justify-center gap-2"
+                >
+                  <Eye size={14} />
+                  Verify Owner Presence
+                </button>
+
+                <button
+                  disabled={confirmBusy}
+                  onClick={() => handleConfirmOwnerStatus(ownerKey, packets)}
+                  title="Report the owner as unreachable"
+                  className="w-full py-3 px-6 rounded-full text-sm font-bold border-2 border-amber-400 text-amber-700 bg-amber-50 hover:bg-amber-100 transition flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  <CheckCircle2 size={18} />
+                  {confirmBusy ? 'Submitting...' : 'Confirm Owner Status'}
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    )}
+  </section>
+)}
 
             {/* SECTION 3: YOU ARE NOMINEE — countdown fixed */}
             {(activeTab === 'all' || activeTab === 'nominee') && (
