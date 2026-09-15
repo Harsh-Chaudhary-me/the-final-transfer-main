@@ -5,8 +5,10 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+const EMAIL_FROM =
+  Deno.env.get("EMAIL_FROM") ?? "TFT Project <onboarding@resend.dev>";
+
 Deno.serve(async (req: Request) => {
-  // Handle CORS preflight
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
@@ -31,7 +33,6 @@ Deno.serve(async (req: Request) => {
 
     const { token, action } = body;
 
-    // Validate required fields
     if (!token || typeof token !== "string" || token.trim() === "") {
       return new Response(
         JSON.stringify({ error: "Missing or invalid required field: token" }),
@@ -39,14 +40,14 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    if (!action || typeof action !== "string" || !["status", "accept", "reject"].includes(action)) {
+    if (!action || !["status", "accept", "reject"].includes(action)) {
       return new Response(
-        JSON.stringify({ error: "Missing or invalid required field: action (must be 'status' | 'accept' | 'reject')" }),
+        JSON.stringify({ error: "action must be 'status' | 'accept' | 'reject'" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // Hash the raw token using SHA-256
+    // Hash the raw token
     let hash: string;
     try {
       const hashBuf = await crypto.subtle.digest(
@@ -66,7 +67,6 @@ Deno.serve(async (req: Request) => {
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
 
     // Query trusted_nominees by hashed token
@@ -83,11 +83,9 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Check if invitation has expired
+    // Expired?
     if (row.invitation_expires_at) {
-      const expiresAt = new Date(row.invitation_expires_at);
-      const now = new Date();
-      if (expiresAt < now) {
+      if (new Date(row.invitation_expires_at) < new Date()) {
         return new Response(
           JSON.stringify({ status: "EXPIRED" }),
           { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -95,34 +93,34 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // ACTION: status - only read, never transition
-    if (action === "status") {
-      const { data: owner } = await adminClient.from("user_profiles")
-        .select("email")
-        .eq("id", row.user_id)
-        .maybeSingle();
+    // Load owner email once
+    const { data: owner } = await adminClient
+      .from("user_profiles")
+      .select("email")
+      .eq("id", row.user_id)
+      .maybeSingle();
+    const ownerEmail = owner?.email?.toLowerCase() ?? null;
 
+    // ---------- ACTION: status (never transitions) ----------
+    if (action === "status") {
       return new Response(
         JSON.stringify({
           status: row.status,
-          owner_email: owner?.email ?? null,
+          owner_email: ownerEmail,
           trusted_email: row.email,
         }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // ACTION: accept
+    // ---------- ACTION: accept ----------
     if (action === "accept") {
-      // Idempotent: already accepted
       if (row.status === "ACCEPTED") {
         return new Response(
           JSON.stringify({ status: "ACCEPTED" }),
           { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
-
-      // Only transition from PENDING
       if (row.status !== "PENDING") {
         return new Response(
           JSON.stringify({ status: row.status }),
@@ -130,11 +128,12 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      // Update status to ACCEPTED
+      const nowIso = new Date().toISOString();
       const { error: updateErr } = await adminClient
         .from("trusted_nominees")
-        .update({ status: "ACCEPTED", accepted_at: "now()", updated_at: "now()" })
-        .eq("id", row.id);
+        .update({ status: "ACCEPTED", accepted_at: nowIso, updated_at: nowIso })
+        .eq("id", row.id)
+        .eq("status", "PENDING");
 
       if (updateErr) {
         console.error("[confirm-trusted] Update error:", updateErr);
@@ -144,39 +143,25 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      // Fetch owner email
-      const { data: owner } = await adminClient.from("user_profiles")
-        .select("email")
-        .eq("id", row.user_id)
-        .maybeSingle();
-
-      // Insert notification for owner
-      if (owner?.email) {
-        const { error: notifErr } = await adminClient.from("web_notifications").insert({
-          user_email: owner.email.toLowerCase(),
+      if (ownerEmail) {
+        await adminClient.from("web_notifications").insert({
+          user_email: ownerEmail,
           title: "Trusted contact accepted",
           message: `${row.email} accepted your invitation.`,
           link: null,
         });
 
-        if (notifErr) {
-          console.warn("[confirm-trusted] Warning inserting notification:", notifErr);
-        }
-      }
-
-      // Send email to owner (using shared email helper or direct fetch)
-      if (owner?.email) {
         try {
           const res = await fetch("https://api.resend.com/emails", {
             method: "POST",
             headers: {
-              "Authorization": `Bearer ${Deno.env.get("RESEND_API_KEY") ?? ""}`,
+              Authorization: `Bearer ${Deno.env.get("RESEND_API_KEY") ?? ""}`,
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              from: "TFT Project <onboarding@resend.dev>",
-              to: [owner.email],
-              subject: "Trusted contact accepted - The Final Transfer",
+              from: EMAIL_FROM,
+              to: [ownerEmail],
+              subject: "Trusted contact accepted — The Final Transfer",
               html: `
                 <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #f0f0f0; border-radius: 16px; background-color: #ffffff;">
                   <h2 style="color: #FF8C00; margin-top: 0;">Trusted Contact Accepted</h2>
@@ -198,8 +183,6 @@ Deno.serve(async (req: Request) => {
           if (!res.ok) {
             const errText = await res.text();
             console.error("[confirm-trusted] Email send failed:", errText);
-          } else {
-            console.log("[confirm-trusted] Email sent to owner:", owner.email);
           }
         } catch (emailErr) {
           console.error("[confirm-trusted] Email exception:", emailErr);
@@ -212,9 +195,8 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // ACTION: reject
+    // ---------- ACTION: reject ----------
     if (action === "reject") {
-      // Only transition from PENDING
       if (row.status !== "PENDING") {
         return new Response(
           JSON.stringify({ status: row.status }),
@@ -222,11 +204,12 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      // Update status to REJECTED
+      const nowIso = new Date().toISOString();
       const { error: updateErr } = await adminClient
         .from("trusted_nominees")
-        .update({ status: "REJECTED", rejected_at: "now()", updated_at: "now()"})
-        .eq("id", row.id);
+        .update({ status: "REJECTED", rejected_at: nowIso, updated_at: nowIso })
+        .eq("id", row.id)
+        .eq("status", "PENDING");
 
       if (updateErr) {
         console.error("[confirm-trusted] Update error:", updateErr);
@@ -236,10 +219,15 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      // Notify owner: "X declined to be your trusted contact."
-      // Note: email notification is logged but not auto-sent to avoid
-      // unintended consumption; the system records the rejection.
-      console.log("[confirm-trusted] Trusted contact rejected by:", row.email);
+      // Notify owner
+      if (ownerEmail) {
+        await adminClient.from("web_notifications").insert({
+          user_email: ownerEmail,
+          title: "Trusted contact declined",
+          message: `${row.email} declined to be your trusted contact.`,
+          link: null,
+        });
+      }
 
       return new Response(
         JSON.stringify({ status: "REJECTED" }),
@@ -247,12 +235,10 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Should not reach here, but safety net
     return new Response(
       JSON.stringify({ error: "Invalid action specified" }),
       { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
-
   } catch (err: any) {
     console.error("[confirm-trusted] Server error:", err);
     return new Response(

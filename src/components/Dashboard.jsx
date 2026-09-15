@@ -34,7 +34,7 @@ async function fetchDashboard() {
 export default function Dashboard({ user, onLogout, onNavigate }) {
   const [activeTab, setActiveTab] = useState('all');
   const [requestingPacketId, setRequestingPacketId] = useState(null);
-  const [confirmingPacketId, setConfirmingPacketId] = useState(null);
+  const [confirmingOwnerId, setConfirmingOwnerId] = useState(null);
   const [downloadingRequestId, setDownloadingRequestId] = useState(null);
   const [unreadCount, setUnreadCount] = useState(0);
 
@@ -482,7 +482,7 @@ export default function Dashboard({ user, onLogout, onNavigate }) {
                     <ShieldAlert size={18} />
                     {anyEmergencyBusy
                       ? 'Submitting Request...'
-                      : 'Request Emergency Access'}
+                      : 'Request Emergency Packet'}
                   </button>
                 )}
 
