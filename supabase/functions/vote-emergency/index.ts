@@ -154,15 +154,23 @@ Deno.serve(async (req: Request) => {
       .select("voter_email, vote")
       .eq("request_id", requestId);
 
-    const trustedEmails = (allTrusted || []).map((t: any) =>
-      t.email?.toLowerCase()
-    );
-    const votesMap = new Map(
-      (allVotes || []).map((v: any) => [v.voter_email?.toLowerCase(), v.vote])
-    );
+ const trustedEmails = (allTrusted || [])
+  .map((t: any) => t.email?.toLowerCase())
+  .filter(Boolean);
 
-    const anyNo = (allVotes || []).some((v: any) => v.vote === "no");
-    const allVoted = trustedEmails.every((e: string) => votesMap.has(e));
+const requesterEmail = request.requester_email?.toLowerCase();
+
+// Voters who need to vote = all trusted EXCEPT the requester
+const requiredVoters = trustedEmails.filter(
+  (e: string) => e !== requesterEmail
+);
+
+const votesMap = new Map(
+  (allVotes || []).map((v: any) => [v.voter_email?.toLowerCase(), v.vote])
+);
+
+const anyNo = (allVotes || []).some((v: any) => v.vote === "no");
+const allVoted = requiredVoters.every((e: string) => votesMap.has(e));
 
     // 7. Update request status
     if (anyNo) {
