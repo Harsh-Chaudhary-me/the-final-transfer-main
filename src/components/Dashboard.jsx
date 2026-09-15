@@ -101,7 +101,7 @@ export default function Dashboard({ user, onLogout, onNavigate }) {
   const ok = window.confirm(
     `Report ${ownerEmail} as unreachable?\n\n` +
     `This will release ${packetCount} packet${packetCount !== 1 ? 's' : ''} ` +
-    `(starting with "${firstTitle}") and notify all nominees.\n\n` +
+    `(starting with "${firstTitle}") and notify all nominees with a claim link.\n\n` +
     `Only proceed if you are confident something has happened to the owner.`
   );
   if (!ok) return;
@@ -112,26 +112,39 @@ export default function Dashboard({ user, onLogout, onNavigate }) {
     if (!session) throw new Error('Authentication session expired');
 
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const res = await fetch(`${supabaseUrl}/functions/v1/confirm-status`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${session.access_token}`,
-        'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-      },
-      body: JSON.stringify({ owner_email: ownerEmail }),
-    });
+    let totalNotified = 0;
+    const failures = [];
 
-    const result = await res.json();
-    if (!res.ok) {
-      throw new Error(result.error || 'Failed to confirm owner status');
+    for (const p of packets) {
+      const res = await fetch(`${supabaseUrl}/functions/v1/verify-death`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify({ packet_id: p.id }),
+      });
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        failures.push(`${p.title || p.id}: ${result.error || res.status}`);
+        continue;
+      }
+      totalNotified += result.notified ?? 0;
     }
 
-    alert(
-      `✅ Owner status recorded for ${ownerEmail}.\n\n` +
-      `${result.packets_affected ?? packetCount} packet(s) released.\n` +
-      `${result.notified ?? 0} nominee(s) notified.`
-    );
+    if (failures.length) {
+      alert(
+        `⚠️ Some packets could not be released:\n\n${failures.join('\n')}\n\n` +
+        `Notified: ${totalNotified}`
+      );
+    } else {
+      alert(
+        `✅ Owner status recorded for ${ownerEmail}.\n\n` +
+        `${packets.length} packet(s) released.\n` +
+        `${totalNotified} nominee(s) notified with claim links.`
+      );
+    }
     refetch();
   } catch (err) {
     alert(`❌ ${err.message || 'An error occurred while recording status.'}`);
@@ -491,6 +504,7 @@ export default function Dashboard({ user, onLogout, onNavigate }) {
                   {confirmBusy ? 'Submitting...' : 'Confirm Owner Status'}
                 </button>
               </div>
+
             </div>
           );
         })}
