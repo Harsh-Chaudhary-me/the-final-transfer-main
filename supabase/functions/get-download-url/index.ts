@@ -73,7 +73,7 @@ Deno.serve(async (req: Request) => {
 
     // 3. Fetch packet with files
     const { data: packet } = await admin
-      .from("packets")
+      .from("user-files")
       .select("id, title, files, nominees")
       .eq("id", request.packet_id)
       .single();
