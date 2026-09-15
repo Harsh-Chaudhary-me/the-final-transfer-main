@@ -7,6 +7,7 @@ import { supabase } from './supabase';
 
 // Components
 import SplashScreen from './components/SplashScreen';
+import NomineeClaim from './components/NomineeClaim';
 import LandingPage from './components/LandingPage';
 import Dashboard from './components/Dashboard';
 import TrustedPortal from './components/TrustedPortal';
@@ -15,7 +16,6 @@ import AuthModal from './components/AuthModal';
 import SetPasswordModal from './components/SetPasswordModal';
 import TrustedVotePage from './components/TrustedVotePage';
 import NomineeDownloadPage from './components/NomineeDownloadPage';
-import NomineeClaim from './components/NomineeClaim';
 import Notifications from './components/Notifications';
 
 // --- MOCK DATA (kept for LegalUploadPage demo use) ---
@@ -36,7 +36,7 @@ const MOCK_ASSIGNED = [
  */
 function resolveViewFromPath(pathname, hasUser) {
   if (pathname === '/trusted/invite') return 'trusted_invite';
-  if (pathname === '/nominee/claim') return 'nominee_claim';
+if (pathname === '/nominee/claim') return 'nominee_claim';
   if (pathname === '/nominee/download') return 'nominee_download';
   if (pathname === '/trusted/vote') return 'trusted_vote';
   if (pathname === '/notifications') return 'notifications';
@@ -210,6 +210,7 @@ export default function App() {
             onBack={() => navigateTo('landing')}
           />
         )}
+        {currentView === 'nominee_claim' && <NomineeClaim key="nominee_claim" />}
       </AnimatePresence>
 
       {/* Auth Modals */}
