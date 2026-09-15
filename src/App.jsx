@@ -7,6 +7,7 @@ import { supabase } from './supabase';
 
 // Components
 import SplashScreen from './components/SplashScreen';
+import AdminClaims from './components/AdminClaims';
 import NomineeClaim from './components/NomineeClaim';
 import LandingPage from './components/LandingPage';
 import Dashboard from './components/Dashboard';
@@ -40,6 +41,7 @@ function resolveViewFromPath(pathname, hasUser) {
 if (pathname === '/nominee/claim') return 'nominee_claim';
   if (pathname === '/nominee/download') return 'nominee_download';
   if (pathname === '/support/death-claim') return 'death_claim_support';
+  if (pathname === '/admin/claims') return 'admin_claims';
   if (pathname === '/trusted/vote') return 'trusted_vote';
   if (pathname === '/notifications') return 'notifications';
   if (pathname === '/trusted') return 'trusted_portal';
@@ -216,6 +218,7 @@ export default function App() {
         {currentView === 'death_claim_support' && (
   <DeathClaimSupport key="death_claim_support" />
 )}
+{currentView === 'admin_claims' && <AdminClaims key="admin_claims" />}
       </AnimatePresence>
 
       {/* Auth Modals */}
