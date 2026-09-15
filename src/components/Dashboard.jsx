@@ -456,82 +456,87 @@ export default function Dashboard({ user, onLogout, onNavigate }) {
               </section>
             )}
 
-            {/* SECTION 3: YOU ARE NOMINEE */}
-            {(activeTab === 'all' || activeTab === 'nominee') && (
-              <section className="space-y-4 pt-4">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-                    <UserCheck className="text-[#FF8C00]" size={22} />
-                    You are Nominee <span className="text-xs font-bold text-gray-400 bg-gray-100 px-2.5 py-0.5 rounded-full">{nomineePackets.length}</span>
-                  </h2>
+            
+            {/* SECTION 3: YOU ARE NOMINEE — only show released packets */}
+{(activeTab === 'all' || activeTab === 'nominee') && (() => {
+  const releasedPackets = nomineePackets.filter(
+    (p) => p.downloadActive || p.download_active
+  );
+
+  return (
+    <section className="space-y-4 pt-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+          <UserCheck className="text-[#FF8C00]" size={22} />
+          You are Nominee{' '}
+          <span className="text-xs font-bold text-gray-400 bg-gray-100 px-2.5 py-0.5 rounded-full">
+            {releasedPackets.length}
+          </span>
+        </h2>
+      </div>
+
+      {releasedPackets.length === 0 ? (
+        <div className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm text-center">
+          <div className="w-16 h-16 bg-gray-100 text-gray-400 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <Lock size={32} />
+          </div>
+          <h3 className="font-bold text-lg text-gray-900 mb-1">
+            Nothing to show yet
+          </h3>
+          <p className="text-gray-500 text-sm max-w-md mx-auto">
+            When a packet is released to you, its download link will appear here.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {releasedPackets.map((packet) => {
+            const requestId = packet.requestId || packet.request_id;
+            return (
+              <div
+                key={packet.id}
+                className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm flex flex-col sm:flex-row justify-between sm:items-center gap-4"
+              >
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-xs font-bold text-[#FF8C00] uppercase tracking-wider">
+                      Nominee Vault
+                    </span>
+                    <span className="text-xs text-gray-400">•</span>
+                    <span className="text-xs font-medium text-gray-500">
+                      {packet.category || 'Encrypted Data'}
+                    </span>
+                  </div>
+                  <h4 className="font-bold text-xl text-gray-900 mb-2">
+                    {packet.title || packet.name || 'Assigned Digital Packet'}
+                  </h4>
+                  <div className="flex items-center gap-3 bg-emerald-50 px-4 py-2.5 rounded-2xl border border-emerald-200 w-fit">
+                    <CheckCircle2 size={20} className="text-emerald-600" />
+                    <div className="text-sm text-emerald-800 font-semibold">
+                      Available to download
+                    </div>
+                  </div>
                 </div>
 
-                {nomineePackets.length === 0 ? (
-                  <div className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm text-center">
-                    <div className="w-16 h-16 bg-gray-100 text-gray-400 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                      <Lock size={32} />
-                    </div>
-                    <h3 className="font-bold text-lg text-gray-900 mb-1">No action needed</h3>
-                    <p className="text-gray-500 text-sm max-w-md mx-auto">
-                      You are not currently designated as a nominee for any active packets.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {nomineePackets.map((packet) => {
-                      const isReleased = packet.downloadActive || packet.download_active;
-                      const requestId = packet.requestId || packet.request_id;
-
-                      return (
-                        <div key={packet.id} className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm flex flex-col sm:flex-row justify-between sm:items-center gap-4">
-                          <div>
-                            <div className="flex items-center gap-2 mb-1">
-                              <span className="text-xs font-bold text-[#FF8C00] uppercase tracking-wider">Nominee Vault</span>
-                              <span className="text-xs text-gray-400">•</span>
-                              <span className="text-xs font-medium text-gray-500">{packet.category || 'Encrypted Data'}</span>
-                            </div>
-                            <h4 className="font-bold text-xl text-gray-900 mb-2">
-                              {packet.title || packet.name || 'Assigned Digital Packet'}
-                            </h4>
-
-                            {!isReleased ? (
-                              <div className="flex items-center gap-2 text-sm text-gray-500 bg-gray-50 px-3 py-1.5 rounded-2xl w-fit border border-gray-100">
-                                <Lock size={16} className="text-gray-400" />
-                                <span className="font-medium">No action needed</span> — Encrypted until emergency release consensus
-                              </div>
-                            ) : (
-                              <div className="flex items-center gap-3 bg-emerald-50 px-4 py-2.5 rounded-2xl border border-emerald-200 w-fit">
-                                <CheckCircle2 size={20} className="text-emerald-600" />
-                                <div className="text-sm text-emerald-800 font-semibold">
-                                  Available to download
-                                </div>
-                              </div>
-                            )}
-                          </div>
-
-                          <div className="shrink-0">
-                            {!isReleased ? (
-                              <button disabled className="w-full sm:w-auto px-6 py-3 rounded-full text-sm font-bold bg-gray-100 text-gray-400 cursor-not-allowed flex items-center justify-center gap-2">
-                                <Lock size={16} /> Locked
-                              </button>
-                            ) : (
-                              <button
-                                disabled={downloadingRequestId === requestId}
-                                onClick={() => handleDownloadData(requestId)}
-                                className="w-full sm:w-auto px-6 py-3 rounded-full text-sm font-bold bg-gradient-to-r from-[#FF8C00] to-[#FF6A00] text-white shadow-lg shadow-orange-500/30 hover:shadow-orange-500/50 hover:scale-105 transition flex items-center justify-center gap-2 disabled:opacity-50"
-                              >
-                                <Download size={18} />
-                                {downloadingRequestId === requestId ? 'Generating Link...' : 'Download Data'}
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </section>
-            )}
+                <div className="shrink-0">
+                  <button
+                    disabled={downloadingRequestId === requestId}
+                    onClick={() => handleDownloadData(requestId)}
+                    className="w-full sm:w-auto px-6 py-3 rounded-full text-sm font-bold bg-gradient-to-r from-[#FF8C00] to-[#FF6A00] text-white shadow-lg shadow-orange-500/30 hover:shadow-orange-500/50 hover:scale-105 transition flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    <Download size={18} />
+                    {downloadingRequestId === requestId
+                      ? 'Generating Link...'
+                      : 'Download Data'}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+})()}
           </div>
         )}
       </main>
