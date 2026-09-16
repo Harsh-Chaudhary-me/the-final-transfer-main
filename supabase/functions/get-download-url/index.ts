@@ -41,11 +41,19 @@ Deno.serve(async (req: Request) => {
     const admin = createClient(supabaseUrl, serviceKey);
 
     // 1. Fetch request
-    const { data: request } = await admin
+    const { data: request, error: reqErr } = await admin
       .from("web_emergency_requests")
       .select("id, packet_id, status, release_at")
       .eq("id", requestId)
-      .single();
+      .maybeSingle();
+
+    if (reqErr) {
+      console.error("[get-download-url] request query error:", reqErr);
+      return new Response(
+        JSON.stringify({ error: `Request query failed: ${reqErr.message}` }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     if (!request) {
       return new Response(JSON.stringify({ error: "Request not found" }), {
@@ -53,7 +61,7 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // 2. Release gate — accept "released" always, or "scheduled" if release_at has passed.
+    // 2. Release gate — released always; scheduled only if release_at <= now
     const now = Date.now();
     const releaseTime = request.release_at ? new Date(request.release_at).getTime() : null;
 
@@ -67,16 +75,26 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // NOTE: No upper-bound / expiry check. Once released, downloads stay
-    // available indefinitely. Signed URLs themselves are short-lived and
-    // regenerated on every request.
-
-    // 3. Fetch packet with files
-    const { data: packet } = await admin
-      .from("user-files")
-      .select("id, title, files, nominees")
+    // 3. Fetch packet from the DATABASE (not the storage bucket)
+    const { data: packet, error: packetErr } = await admin
+      .from("packets")
+      .select("id, title, files, nominees, user_id")
       .eq("id", request.packet_id)
-      .single();
+      .maybeSingle();
+
+    console.log("[get-download-url] packet lookup:", {
+      packetId: request.packet_id,
+      found: !!packet,
+      error: packetErr?.message,
+    });
+
+    if (packetErr) {
+      console.error("[get-download-url] packet query error:", packetErr);
+      return new Response(
+        JSON.stringify({ error: `Packet query failed: ${packetErr.message}` }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     if (!packet) {
       return new Response(JSON.stringify({ error: "Packet not found" }), {
@@ -109,15 +127,34 @@ Deno.serve(async (req: Request) => {
     }
     if (!Array.isArray(files)) files = [];
 
-    // 6. Generate signed URLs — short TTL per URL; regenerated on each request.
+    console.log("[get-download-url] files to sign:", JSON.stringify(files));
+
+    // 6. Sign each file from the correct bucket
     const signedUrls: any[] = [];
     for (const f of files) {
-      const path = typeof f === "string" ? f : (f?.path || f?.name);
+      let path: string | null = null;
+
+      if (typeof f === "string") {
+        path = f;
+      } else if (f?.path && typeof f.path === "string") {
+        path = f.path;
+      } else if (f?.name) {
+        // Construct full path if only the filename is present
+        path = `${packet.user_id}/${packet.id}/${f.name}`;
+      }
+
       if (!path) continue;
 
-      const { data: signed } = await admin.storage
-        .from("packets")
-        .createSignedUrl(path, 21600); // 6 hours — URL lifetime, not access window
+      console.log("[get-download-url] signing path:", path);
+
+      const { data: signed, error: signErr } = await admin.storage
+        .from("user-files")
+        .createSignedUrl(path, 21600);
+
+      if (signErr) {
+        console.error("[get-download-url] sign error for", path, signErr);
+        continue;
+      }
 
       if (signed?.signedUrl) {
         signedUrls.push({
